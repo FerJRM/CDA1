@@ -1,0 +1,18 @@
+# Ignore all .npy files
+*.npy
+
+# Ignore all .csv files
+*.csv
+
+# Ignore all .ds_store files
+**/.DS_Store
+
+# Ignore all pycache subfolders
+__pycache__/
+*.pyc
+
+# Ignore pdf files
+*.pdf
+
+# Ignore text files
+*.txt
