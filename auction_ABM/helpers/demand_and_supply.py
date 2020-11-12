@@ -12,7 +12,35 @@ import random
 
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import fsolve
+
+def load_demand_supply(filename):
+    """
+    Loads demand and supply schedule from text file into lists
+    """
+    prices_buy, prices_sell = [], []
+    with open(filename, 'r') as f:
+        line = f.readline().rstrip("\n")
+        line = f.readline().rstrip("\n")
+        
+        while line != "":
+            buy, sell = line.split("\t")
+            prices_buy.append(int(buy)), prices_sell.append(int(sell))
+            line = f.readline().rstrip("\n")
+
+    return prices_buy, prices_sell
+
+def generate_random_DS(min_limit, max_limit, total_buyers, total_sellers, commodities):
+    """
+    Generates demand and supply for a double auction by means of induced value theory
+    """
+    eq = ()
+    while len(eq) == 0 or 0 in eq:
+        prices = random_limit_prices(min_limit, max_limit, total_buyers, total_sellers, commodities)
+        prices_buy, prices_sell, all_prices_buy, all_prices_sell = prices
+
+        eq = determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_sell)
+
+    return prices_buy, prices_sell, all_prices_buy, all_prices_sell, eq
 
 def random_limit_prices(min_price, max_price, total_buyers, total_sellers, commodities):
     """
@@ -77,7 +105,6 @@ def demand(p, valuations):
     a product with a given price and a given set of valuations ordered 
     from highest-to-lowest.
     """
-
     quantity = 0
     for valuation in valuations:
         if p <= valuation:
@@ -93,7 +120,6 @@ def supply(p, valuations):
     a product with a given price and a given set of valuations ordered 
     from lowest-to-highest.
     """
-
     quantity = 0
     for valuation in valuations:
         if p >= valuation:
@@ -118,13 +144,13 @@ def determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_se
         excess_demand_sell = demand_minus_supply(sell, all_prices_buy, all_prices_sell)
 
         if excess_demand_buy >= 0:
-            return buy, demand(buy, all_prices_buy)
-        if excess_demand_sell <= 0:
-            return sell, demand(sell, all_prices_sell)
+            q = demand(buy, all_prices_buy)
+            surplus = buy * q
+            return buy, demand(buy, all_prices_buy), surplus
 
     return ()
 
-def save_prices(prices_buy, prices_sell, folder, market_id):
+def save_prices(prices_buy, prices_sell, equilibrium, folder, market_id):
     """
     Saves the limit prices tot text file, so it can be re-used
     """
@@ -134,6 +160,13 @@ def save_prices(prices_buy, prices_sell, folder, market_id):
         f.write("BUY\tSELL\n")
         for buy, sell in zip(prices_buy, prices_sell):
             f.write("{}\t{}\n".format(buy, sell))
+
+    filename = os.path.join(folder, "equilbrium_market_" + str(market_id) + ".txt")
+    with open(filename, 'w') as f:
+        price, quantity, surplus = equilibrium
+        f.write("Price\t{}\n".format(price))
+        f.write("Quantity\t{}\n".format(quantity))
+        f.write("Surplus\t{}\n".format(surplus))
 
 
 def plot_demand_supply(
@@ -183,20 +216,3 @@ def plot_demand_supply(
         plt.show()
 
     plt.close(fig)
-
-if __name__ == "__main__":
-    min_limit, max_limit, total_buyers, total_sellers, commodities = 1, 200, 6, 5, 5
-    prices = random_limit_prices(min_limit, max_limit, total_buyers, total_sellers, commodities)
-    prices_buy, prices_sell, all_prices_buy, all_prices_sell = prices
-
-    (p_eq, q_eq) = determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_sell)
-    print("Equilibrium price:", p_eq)
-    print("Equilibrium quantity:", q_eq)
-
-    folder = os.path.join("results", "demand_and_supply", "random")
-    plot_demand_supply(
-        prices_buy, prices_sell, all_prices_buy, all_prices_sell, 
-        total_buyers, total_sellers, commodities, 0, max_limit, 
-        folder, 1, False, True
-    )
-    save_prices(prices_buy, prices_sell, folder, 1)
