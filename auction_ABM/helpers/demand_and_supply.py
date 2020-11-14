@@ -13,22 +13,6 @@ import random
 import matplotlib.pyplot as plt
 import numpy as np
 
-def load_demand_supply(filename):
-    """
-    Loads demand and supply schedule from text file into lists
-    """
-    prices_buy, prices_sell = [], []
-    with open(filename, 'r') as f:
-        line = f.readline().rstrip("\n")
-        line = f.readline().rstrip("\n")
-        
-        while line != "":
-            buy, sell = line.split("\t")
-            prices_buy.append(int(buy)), prices_sell.append(int(sell))
-            line = f.readline().rstrip("\n")
-
-    return prices_buy, prices_sell
-
 def generate_random_DS(min_limit, max_limit, total_buyers, total_sellers, commodities):
     """
     Generates demand and supply for a double auction by means of induced value theory
@@ -161,7 +145,7 @@ def save_prices(prices_buy, prices_sell, equilibrium, folder, market_id):
         for buy, sell in zip(prices_buy, prices_sell):
             f.write("{}\t{}\n".format(buy, sell))
 
-    filename = os.path.join(folder, "equilbrium_market_" + str(market_id) + ".txt")
+    filename = os.path.join(folder, "equilibrium_market_" + str(market_id) + ".txt")
     with open(filename, 'w') as f:
         price, quantity, surplus = equilibrium
         f.write("Price\t{}\n".format(price))
@@ -200,8 +184,13 @@ def plot_demand_supply(
         plt.xticks([(x + 1) * total_buyers for x in range(commodities + 1)])
     else:
         plt.xticks([(x + 1) * total_sellers for x in range(commodities + 1)])
-    step = (max_poss_price - min_poss_price) // 5
-    plt.yticks(list(range(min_poss_price, max_poss_price + step, step)))
+    
+    if min_poss_price == 1:
+        step = (max_poss_price - 0) // 5
+        plt.yticks(list(range(0, max_poss_price + step, step)))
+    else:
+        step = (max_poss_price - min_poss_price) // 5
+        plt.yticks(list(range(min_poss_price, max_poss_price + step, step)))
 
     # add labels to axis and legend to plot
     plt.xlabel("Quantity")

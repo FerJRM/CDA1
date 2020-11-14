@@ -11,29 +11,28 @@ import os
 import sys
 sys.path.insert(0, "auction_ABM")
 
-import helpers.demand_and_supply as ds
+import matplotlib.pyplot as plt
+
+from helpers.cmd_cda import set_arguments
+from helpers.data import load_demand_supply, load_parameters
+from classes.auctions.cda_GS import CDA
 
 
 if __name__ == "__main__":
-    min_poss_price, max_poss_price = 0, 200
-    min_limit, max_limit, total_buyers, total_sellers, commodities = 1, 200, 10, 10, 10
+    name, market_id = set_arguments()
+    prices_buy, prices_sell, eq = load_demand_supply(name, market_id)
+    params = load_parameters(name)
+    params_strats, total_buyers_strats, total_sellers_strats, params_model = params
 
-    # data_ds = os.path.join("data", "demand_and_supply", "random", "market_1.txt")
-    # prices_buy, prices_sell = ds.load_demand_supply(data_ds)
-
-    ds_results = ds.generate_random_DS(min_limit, max_limit, total_buyers, total_sellers, commodities)
-    prices_buy, prices_sell, all_prices_buy, all_prices_sell, equilibrium = ds_results
-    p_eq, q_eq, surplus = equilibrium
-    print("Equilibrium price:", p_eq)
-    print("Equilibrium quantity:", q_eq)
-    print("===============================================================")
-
-    folder = os.path.join("results", "demand_and_supply", "random")
-    ds.plot_demand_supply(
-        prices_buy, prices_sell, all_prices_buy, all_prices_sell, 
-        total_buyers, total_sellers, commodities, min_poss_price, max_poss_price, 
-        folder, 1, False, True
+    auction = CDA(
+        0, prices_buy, prices_sell, eq, params_model, params_strategies=params_strats, 
+        total_buyers_strategies=total_buyers_strats, total_sellers_strategies=total_sellers_strats, 
+        save_output=True
     )
+    auction.run_model()
 
-    folder = os.path.join("data", "demand_and_supply", "random")
-    ds.save_prices(prices_buy, prices_sell, equilibrium, folder, 1)
+    data_model = auction.datacollector.get_model_vars_dataframe()
+    print(data_model.head())
+    data_model.plot(x="Time", y="Price")
+    plt.show()
+    plt.close()
