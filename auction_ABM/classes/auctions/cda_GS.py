@@ -7,6 +7,7 @@ Description of file
 Name developers
 """
 
+import os
 import math
 import logging
 from collections import defaultdict
@@ -24,13 +25,31 @@ class CDA(Model):
     It manages the flow in of agents steps and collects the necessary data,
     """
     def __init__(
-            self, sim, prices_buy, prices_sell, equilibrium, parameters, 
+            self, name, market_id, prices_buy, prices_sell, equilibrium, parameters, 
             params_strategies={"ZI": {}}, total_buyers_strategies={"ZI": 10}, 
             total_sellers_strategies={"ZI": 10}, save_output=False, log=True
         ):
+        """
+        Initialize each model with:
+
+        name: name of the auction (str)
+        market_id: id of the market (int)
+        prices_buy: limit prices buyers (list)
+        prices_sell: limit prices sellers (list)
+        equilibrium: equilibrium price, quanitity and surplus (tuple)
+        parameters: paramaters such as min/max price, limit price, total periods 
+                    and total time in period for auction (dict {param: value, param2, value2})
+        params_strategies: agent specific parameters (nested dictionary {strategy:, {param: value}})
+        total_buyers_strategies: distrbution agents on buyers' side (dict {strategy: total})
+        total_sellers_strategies: distrbution agents on sellers' side (dict {strategy: total})
+        save_output: boolean to indicate if data of transactions should be saved (bool)
+        log: boolean to indicate if important steps in simulation should be logged (bool)
+        """
         super().__init__(self)
         
-        self.sim = sim
+        # initialize given attributes
+        self.name = name
+        self.market_id = market_id
         self.prices_buy = prices_buy
         self.prices_sell = prices_sell
         self.eq_price, self.eq_quantity, self.eq_surplus = equilibrium
@@ -47,12 +66,25 @@ class CDA(Model):
         self.save_output = save_output
         self.log = log
 
+        # setup log file if required
+        if log:
+            log_folder = os.path.join("results", "log", name)
+            os.makedirs(log_folder, exist_ok=True)
+            log_auction_name = "auction_{}_market_{}".format(name, market_id)
+            rel_path = os.path.join(log_folder, log_auction_name)
+            self.log_auction = logging.getLogger(log_auction_name)
+            filehandler = logging.FileHandler(rel_path + ".log", 'w')
+
+            self.log_auction.setLevel(logging.INFO)
+            self.log_auction.addHandler(filehandler)
+
         # monitoring variables for during a trading period
         self.transaction_price = None
         self.best_bid, self.best_bid_id = 0, None
         self.best_ask, self.best_ask_id = math.inf, None
         self.surplus = defaultdict(float)
         self.quantity = defaultdict(float)
+        self.efficiency = defaultdict(float)
 
         # set up scheduler for auction
         self.schedule = RandomGS(self)
@@ -62,8 +94,8 @@ class CDA(Model):
         self.init_population()
         self.datacollector = DataCollector(
             model_reporters={
-                "Simulation": "sim",
                 "Period": "period",
+                "Efficiency": CDA.allocative_efficiency,
                 "Surplus": CDA.surplus_curr_period, 
                 "Quantity": CDA.quantity_curr_period,
                 "Price": CDA.last_transaction_price,
@@ -83,9 +115,22 @@ class CDA(Model):
         """
         return "Period: {}\nTime: {}\nBest Bid: {}\nBid ID: {}\n" \
             "Best Ask: {}\nAsk ID: {}\nLast Price: {}\n" \
+            "Surplus: {}\nQuantity: {}\n" \
             .format(
                 self.period, self.time, self.best_bid, self.best_bid_id, 
-                self.best_ask, self.best_ask_id, self.transaction_price
+                self.best_ask, self.best_ask_id, self.transaction_price, 
+                self.surplus_curr_period(), self.quantity_curr_period()
+            )
+
+    def get_info_transaction(self, buyer, seller, buyer_surplus, seller_surplus):
+        """
+        Returns formatted string wiht some basic info about the transaction made.
+        """
+        return "Buyer ID: {}, Seller ID: {}, Price {}\n" \
+            "Buyer surplus: {}, Seller surplus: {}, Surplus: {}, Quantity: {}\n" \
+            .format(
+                buyer.unique_id, seller.unique_id, self.transaction_price, buyer_surplus, 
+                seller_surplus, self.surplus[self.period], self.quantity[self.period]
             )
 
     def init_population(self):
@@ -138,6 +183,12 @@ class CDA(Model):
         """
         return self.transaction_price
 
+    def allocative_efficiency(self):
+        """
+        Returns the allocative efficency for current period
+        """
+        return self.surplus_curr_period() / self.eq_surplus
+
     def get_time(self):
         """
         Returns current time stamp
@@ -165,46 +216,38 @@ class CDA(Model):
 
         return agent.offer <= self.best_bid
 
+    def manage_order_transaction(self, buyer, seller):
+        """
+        Updates the agents' and model paramaters for a transaction
+        """
+        buyer_surplus = buyer.transaction_update(self.transaction_price)
+        seller_surplus = seller.transaction_update(self.transaction_price)
+        self.surplus[self.period] += buyer_surplus + seller_surplus
+        self.quantity[self.period] += 1
+
+        if self.log:
+            self.log_auction.info(self.get_info_transaction(buyer, seller, buyer_surplus, seller_surplus))
+
     def make_trade(self, agent):
         """
         Make exchange between agents
         """
-        logging.info("TRANSACTION POSSIBLE")
+
+        # update log
+        if self.log:
+            self.log_auction.info("TRANSACTION POSSIBLE")
+
+        # transaction price depends on the condition if last transaction was made by a buyer
         if agent.market_side == "buyer":
             self.transaction_price = self.best_ask
             seller = self.schedule.get_agent(self.best_ask_id)
-            buyer_surplus = agent.transaction_update(self.transaction_price)
-            seller_surplus = seller.transaction_update(self.transaction_price)
-            self.surplus[self.period] += buyer_surplus + seller_surplus
-            self.quantity[self.period] += 1
-
-            logging.info(
-                "Buyer ID: {}, Seller ID: {}, Price {}\n" \
-                "Buyer surplus: {}, Seller surplus: {}, Surplus: {}, Quantity: {}\n" \
-                .format(
-                    agent.unique_id, seller.unique_id, self.transaction_price, buyer_surplus, 
-                    seller_surplus, self.surplus[self.period], self.quantity[self.period]
-                )
-            )
-
+            self.manage_order_transaction(agent, seller)
         else:
             self.transaction_price = self.best_bid
             buyer = self.schedule.get_agent(self.best_bid_id)
-            buyer_surplus = buyer.transaction_update(self.transaction_price)
-            seller_surplus = agent.transaction_update(self.transaction_price)
-            self.surplus[self.period] += buyer_surplus + seller_surplus
-            self.quantity[self.period] += 1
+            self.manage_order_transaction(buyer, agent)
 
-            logging.info(
-                    "Buyer ID: {}, Seller ID: {}, Price {}\n" \
-                    "Buyer surplus: {}, Seller surplus: {}, Surplus: {}, Quantity: {}\n" \
-                    .format(
-                        buyer.unique_id, agent.unique_id, self.transaction_price, buyer_surplus, 
-                        seller_surplus, self.surplus[self.period], self.quantity[self.period]
-                    )
-            )
-
-        # reset outstanding bid and ask
+        # reset outstanding bids and asks
         self.reset_bids(), self.reset_asks()
 
     def update_best_price(self, agent):
@@ -212,16 +255,19 @@ class CDA(Model):
         Updates best bid or ask depending on the market side of agent and its
         newly offered price
         """
-        logging.info("BEFORE UPDATE OUTSTANDING BIDS")
-        logging.info(self.get_info())
+        if self.log:
+            self.log_auction.info("BEFORE UPDATE OUTSTANDING BIDS")
+            self.log_auction.info(self.get_info())
 
+        # update 
         if agent.market_side == "buyer":
             self.best_bid, self.best_bid_id = agent.offer, agent.unique_id
         else:
             self.best_ask, self.best_ask_id = agent.offer, agent.unique_id
 
-        logging.info("AFTER UPDATE OUTSTANDING BIDS")
-        logging.info(self.get_info())
+        if self.log:
+            self.log_auction.info("AFTER UPDATE OUTSTANDING BIDS")
+            self.log_auction.info(self.get_info())
 
     def is_end_auction(self):
         """
@@ -249,31 +295,49 @@ class CDA(Model):
 
     def step(self):
         """
+        Simulate step in auction
         """
         return self.schedule.step()
 
     def run_model(self):
         """
+        Run auction.
         """
+
+        # run auction for given amount of periods, each having the same total time
         for self.period in range(self.periods):
             for self.time in range(self.total_time):
                 
-                logging.info(self.get_info())
+                # update log
+                if self.log:
+                    self.log_auction.info("BEORE STEP IN AUCTION")
+                    self.log_auction.info(self.get_info())
 
-                transaction_made = self.step()
-                if transaction_made:
+                # update data if transaction is made during step
+                if self.step():
                     self.datacollector.collect(self)
                 
-                logging.info(self.get_info())
+                # update log
+                if self.log:
+                    self.log_auction.info("AFTER STEP IN AUCTION")
+                    self.log_auction.info(self.get_info())
 
+                # determines if all possible trades are already done, if so terminate period
                 if self.is_end_auction():
                     break
 
+            # update allocative efficiency for current period; 
+            # reset auction for next period
+            self.efficiency[self.period] = self.allocative_efficiency()
             self.reset_period()
 
-            logging.info("Auction period {} ended in time step {}".format(self.period, self.time))
-            logging.info(
-                "Efficiency {}, Surplus: {}, Quantity traded {}".format(
-                    self.surplus[self.period] / self.eq_surplus, self.surplus[self.period], self.quantity[self.period]
+            # update log with final results period
+            if self.log:
+                self.log_auction.info("Auction period {} ended in time step {}".format(self.period, self.time))
+                self.log_auction.info(
+                    "Efficiency {}, Surplus: {}, Quantity traded {}".format(
+                        self.surplus[self.period] / self.eq_surplus, 
+                        self.surplus[self.period], 
+                        self.quantity[self.period]
+                    )
                 )
-            )

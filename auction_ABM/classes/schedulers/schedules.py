@@ -7,7 +7,6 @@ Description of file
 Name developers
 """
 
-import logging
 import random
 
 from mesa.time import BaseScheduler
@@ -25,8 +24,8 @@ class RandomGS(BaseScheduler):
 
     def get_active_agent(self):
         """
-        Randomize agents and subsequently chooses first agents that is active 
-        and willing too shout.
+        Randomize agents and subsequently chooses first agents that is in market 
+        and active.
         """
         for agent in self.agent_buffer(shuffled=True):
             agent.set_activity(), agent.set_in_market()
@@ -43,7 +42,8 @@ class RandomGS(BaseScheduler):
 
     def reset_agents(self):
         """
-        Resets all agents' attributes to their intial values
+        Resets all agents' attributes to their intial values and reset
+        time and step attributes scheduler
         """
         for agent in self.agent_buffer():
             agent.reset_agent()
@@ -53,21 +53,32 @@ class RandomGS(BaseScheduler):
 
     def step(self):
         """
-        Executes the steps of all agents, one at a time, in random order
+        Executes the steps of all agents, one at a time, in random order. 
+        Note that it is possible that none of the agents is selected. If so, 
+        no action takes place.
+
+        The function returns True if a transaction has been made, otherwise False
         """
+
+        # only perform step if actie agent is selected
         agent, transaction_made = self.get_active_agent(), False
         if agent is not None:
+            
+            # update log
+            if self.model.log:
+                self.model.log_auction.info("BEFORE STEP AGENT")
+                self.model.log_auction.info(agent.get_info())
 
-            logging.info("BEFORE STEP")
-            logging.info(agent.get_info())
-
+            # perform agent's step
             agent.step()
 
-            logging.info("AFTER")
-            logging.info(agent.get_info())
+            # update log
+            if self.model.log:
+                self.model.log_auction.info("AFTER STEP AGENT")
+                self.model.log_auction.info(agent.get_info())
 
-            # check if trade is possible, if so make trade, reset agents' offers
-            # and also update statistics model and of the agents trading
+            # determines if trade needs to be made or outstanding bid/ask 
+            # should be updated
             if self.model.is_trade_possible(agent):
                 self.model.make_trade(agent)
                 self.reset_offers_agents()
@@ -75,6 +86,7 @@ class RandomGS(BaseScheduler):
             else:
                 self.model.update_best_price(agent)
 
+        # update time and steps of auction
         self.steps += 1
         self.time += 1
         
