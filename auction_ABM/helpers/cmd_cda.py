@@ -25,6 +25,9 @@ def set_arguments():
     parser.add_argument(
         "market_id", type=int, help="id of market of the given simulation to to run"
     )
+    parser.add_argument(
+        "--log", type=str2bool, default=True, help="run with logfile or not"
+    )
     
     args = parser.parse_args()
     if not do_files_exists(args.name, args.market_id):
@@ -33,7 +36,21 @@ def set_arguments():
             "and market id: {}".format(args.name, args.market_id)
             )
 
-    return args.name, args.market_id
+    return args.name, args.market_id, args.log
+
+def str2bool(v):
+    """
+    Parser helper function for boolean type
+    https://stackoverflow.com/questions/15008758/parsing-boolean-values-with-argparse
+    """
+    if isinstance(v, bool):
+       return v
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
 
 def do_files_exists(name, market_id):
     """

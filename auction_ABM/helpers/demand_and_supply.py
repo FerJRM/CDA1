@@ -22,7 +22,7 @@ def generate_random_DS(min_limit, max_limit, total_buyers, total_sellers, commod
         prices = random_limit_prices(min_limit, max_limit, total_buyers, total_sellers, commodities)
         prices_buy, prices_sell, all_prices_buy, all_prices_sell = prices
 
-        eq = determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_sell)
+        eq = determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_sell, total_buyers, total_sellers)
 
     return prices_buy, prices_sell, all_prices_buy, all_prices_sell, eq
 
@@ -119,17 +119,35 @@ def demand_minus_supply(p, all_prices_buy, all_prices_sell):
     """
     return demand(p, all_prices_buy) - supply(p, all_prices_sell)
 
-def determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_sell):
+def determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_sell, total_buyers, total_sellers):
     """
     Determines the equlibrium for given sets of valuations
     """
+    surplus = 0
+    prev_buy, prev_sell = 0, 0
+    prev_buy_left, prev_sell_left = 0, 0
     for i, (buy, sell) in enumerate(zip(prices_buy, prices_sell)):
         excess_demand_buy = demand_minus_supply(buy, all_prices_buy, all_prices_sell)
-        excess_demand_sell = demand_minus_supply(sell, all_prices_buy, all_prices_sell)
+        
+        if total_buyers > total_sellers:
+            if prev_buy_left > 0:
+                surplus += (prev_buy - sell) * prev_buy_left
+
+            trades = total_sellers - prev_buy_left
+            prev_buy_left = total_buyers - trades
+            prev_buy = buy
+            
+        elif total_buyers < total_sellers:
+            if prev_sell_left > 0:
+                surplus += (buy - prev_sell) * prev_sell_left
+
+            trades = total_buyers - prev_sell_left
+            prev_sell_left = total_sellers - trades
+            prev_sell = sell
+
+        surplus += (buy - sell) * trades
 
         if excess_demand_buy >= 0:
-            q = demand(buy, all_prices_buy)
-            surplus = buy * q
             return buy, demand(buy, all_prices_buy), surplus
 
     return ()

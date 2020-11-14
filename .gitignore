@@ -16,3 +16,6 @@ __pycache__/
 
 # Ignore text files
 *.txt
+
+# Ignore log files
+*.log

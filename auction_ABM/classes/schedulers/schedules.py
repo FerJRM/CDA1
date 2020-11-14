@@ -7,6 +7,7 @@ Description of file
 Name developers
 """
 
+import logging
 import random
 
 from mesa.time import BaseScheduler
@@ -56,16 +57,18 @@ class RandomGS(BaseScheduler):
         """
         agent, transaction_made = self.get_active_agent(), False
         if agent is not None:
-            # print("BEFORE STEP")
-            # print(agent.get_info())
+
+            logging.info("BEFORE STEP")
+            logging.info(agent.get_info())
+
             agent.step()
-            # print("AFTER")
-            # print(agent.get_info())
+
+            logging.info("AFTER")
+            logging.info(agent.get_info())
 
             # check if trade is possible, if so make trade, reset agents' offers
             # and also update statistics model and of the agents trading
             if self.model.is_trade_possible(agent):
-                # print("TRADE POSSIBLE!!!!!")
                 self.model.make_trade(agent)
                 self.reset_offers_agents()
                 transaction_made = True

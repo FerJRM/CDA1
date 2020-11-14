@@ -8,6 +8,7 @@ Name developers
 """
 
 import math
+import logging
 from collections import defaultdict
 
 from mesa import Model
@@ -25,7 +26,7 @@ class CDA(Model):
     def __init__(
             self, sim, prices_buy, prices_sell, equilibrium, parameters, 
             params_strategies={"ZI": {}}, total_buyers_strategies={"ZI": 10}, 
-            total_sellers_strategies={"ZI": 10}, save_output=False
+            total_sellers_strategies={"ZI": 10}, save_output=False, log=True
         ):
         super().__init__(self)
         
@@ -44,6 +45,7 @@ class CDA(Model):
         self.buyers_strats = total_buyers_strategies
         self.sellers_strats = total_sellers_strategies
         self.save_output = save_output
+        self.log = log
 
         # monitoring variables for during a trading period
         self.transaction_price = None
@@ -167,6 +169,7 @@ class CDA(Model):
         """
         Make exchange between agents
         """
+        logging.info("TRANSACTION POSSIBLE")
         if agent.market_side == "buyer":
             self.transaction_price = self.best_ask
             seller = self.schedule.get_agent(self.best_ask_id)
@@ -174,6 +177,15 @@ class CDA(Model):
             seller_surplus = seller.transaction_update(self.transaction_price)
             self.surplus[self.period] += buyer_surplus + seller_surplus
             self.quantity[self.period] += 1
+
+            logging.info(
+                "Buyer ID: {}, Seller ID: {}, Price {}\n" \
+                "Buyer surplus: {}, Seller surplus: {}, Surplus: {}, Quantity: {}\n" \
+                .format(
+                    agent.unique_id, seller.unique_id, self.transaction_price, buyer_surplus, 
+                    seller_surplus, self.surplus[self.period], self.quantity[self.period]
+                )
+            )
 
         else:
             self.transaction_price = self.best_bid
@@ -183,6 +195,15 @@ class CDA(Model):
             self.surplus[self.period] += buyer_surplus + seller_surplus
             self.quantity[self.period] += 1
 
+            logging.info(
+                    "Buyer ID: {}, Seller ID: {}, Price {}\n" \
+                    "Buyer surplus: {}, Seller surplus: {}, Surplus: {}, Quantity: {}\n" \
+                    .format(
+                        buyer.unique_id, agent.unique_id, self.transaction_price, buyer_surplus, 
+                        seller_surplus, self.surplus[self.period], self.quantity[self.period]
+                    )
+            )
+
         # reset outstanding bid and ask
         self.reset_bids(), self.reset_asks()
 
@@ -191,10 +212,16 @@ class CDA(Model):
         Updates best bid or ask depending on the market side of agent and its
         newly offered price
         """
+        logging.info("BEFORE UPDATE OUTSTANDING BIDS")
+        logging.info(self.get_info())
+
         if agent.market_side == "buyer":
             self.best_bid, self.best_bid_id = agent.offer, agent.unique_id
         else:
             self.best_ask, self.best_ask_id = agent.offer, agent.unique_id
+
+        logging.info("AFTER UPDATE OUTSTANDING BIDS")
+        logging.info(self.get_info())
 
     def is_end_auction(self):
         """
@@ -230,19 +257,23 @@ class CDA(Model):
         """
         for self.period in range(self.periods):
             for self.time in range(self.total_time):
-                # print(self.get_info())
+                
+                logging.info(self.get_info())
+
                 transaction_made = self.step()
                 if transaction_made:
                     self.datacollector.collect(self)
-                # print(self.get_info())
+                
+                logging.info(self.get_info())
 
                 if self.is_end_auction():
-                    self.reset_period()
                     break
 
-            print("Auction period {} ended in time step {}".format(self.period, self.time))
-            print(
-                "Efficiency {} Quantity traded {}".format(
-                    self.surplus[self.period] / self.eq_surplus, self.quantity[self.period]
+            self.reset_period()
+
+            logging.info("Auction period {} ended in time step {}".format(self.period, self.time))
+            logging.info(
+                "Efficiency {}, Surplus: {}, Quantity traded {}".format(
+                    self.surplus[self.period] / self.eq_surplus, self.surplus[self.period], self.quantity[self.period]
                 )
             )
