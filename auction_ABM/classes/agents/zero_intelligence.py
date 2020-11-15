@@ -40,11 +40,17 @@ class BasicAgent(Agent):
             f"\nBudget: {self.budget}" \
             f"\n================================================="
 
+    def still_commodities(self):
+        """
+        Returns True if agent still has commodites left, otherwise False
+        """
+        return self.quantity < len(self.prices)
+
     def set_in_market(self):
         """
         Determines if trader is still in market (not all commodies )
         """
-        self.in_market = True
+        self.in_market = self.still_commodities()
 
     def is_in_market(self):
         """
@@ -69,7 +75,10 @@ class BasicAgent(Agent):
         """
         Get current limit price
         """
-        return self.prices[self.quantity]
+        if self.still_commodities():
+            return self.prices[self.quantity]
+        
+        return 0
 
     def get_budget(self):
         """
@@ -125,16 +134,19 @@ class ZI_buy(BasicAgent):
         """
         Determines if trader is still in market (not all commodies )
         """
-        self.in_market = self.quantity < len(self.prices) -  1
+        self.in_market = self.still_commodities()
 
     def set_activity(self):
         """
         Checks if buyer can make offer thats within budget contraint and
         without losses
         """
-        is_endowed =  self.prices[self.quantity] > self.model.best_bid
-        enough_budget = self.model.best_bid < self.budget
-        self.active = is_endowed and enough_budget
+        if self.still_commodities(): 
+            is_endowed =  self.prices[self.quantity] > self.model.best_bid
+            enough_budget = self.model.best_bid < self.budget
+            self.active = is_endowed and enough_budget
+        else:
+            self.active = False
 
     def offer_price(self):
         """
@@ -175,8 +187,17 @@ class ZI_sell(BasicAgent):
         self.budget = 0
         self.offer = math.inf
 
+    def get_price(self):
+        if self.still_commodities():
+            return self.prices[self.quantity]
+
+        return math.inf
+
     def set_activity(self):
-        self.active = self.prices[self.quantity] < self.model.best_ask
+        if self.still_commodities():
+            self.active = self.prices[self.quantity] < self.model.best_ask
+        else:
+            self.active = False
 
     def offer_price(self):
         valuation = self.prices[self.quantity]

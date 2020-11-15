@@ -26,6 +26,12 @@ def set_arguments():
         "market_id", type=int, help="id of market of the given simulation to to run"
     )
     parser.add_argument(
+        "N", type=int, help="amount of simulations"
+    )
+    parser.add_argument(
+        "--save_output", type=str2bool, default=True, help="save data transaction or not"
+    )
+    parser.add_argument(
         "--log", type=str2bool, default=True, help="run with logfile or not"
     )
     
@@ -36,7 +42,7 @@ def set_arguments():
             "and market id: {}".format(args.name, args.market_id)
             )
 
-    return args.name, args.market_id, args.log
+    return args.name, args.market_id, args.N, args.save_output, args.log
 
 def str2bool(v):
     """

@@ -12,6 +12,8 @@ import math
 import logging
 from collections import defaultdict
 
+import pandas as pd
+from scipy.stats import spearmanr
 from mesa import Model
 from mesa.datacollection import DataCollector
 from tqdm import tqdm as pbar
@@ -25,13 +27,14 @@ class CDA(Model):
     It manages the flow in of agents steps and collects the necessary data,
     """
     def __init__(
-            self, name, market_id, prices_buy, prices_sell, equilibrium, parameters, 
+            self, unique_id, name, market_id, prices_buy, prices_sell, equilibrium, parameters, 
             params_strategies={"ZI": {}}, total_buyers_strategies={"ZI": 10}, 
             total_sellers_strategies={"ZI": 10}, save_output=False, log=True
         ):
         """
         Initialize each model with:
 
+        unique_id: id of the model
         name: name of the auction (str)
         market_id: id of the market (int)
         prices_buy: limit prices buyers (list)
@@ -48,6 +51,7 @@ class CDA(Model):
         super().__init__(self)
         
         # initialize given attributes
+        self.unique_id = unique_id
         self.name = name
         self.market_id = market_id
         self.prices_buy = prices_buy
@@ -70,7 +74,7 @@ class CDA(Model):
         if log:
             log_folder = os.path.join("results", "log", name)
             os.makedirs(log_folder, exist_ok=True)
-            log_auction_name = "auction_{}_market_{}".format(name, market_id)
+            log_auction_name = "auction_{}_ID_{}_market_{}".format(name, unique_id, market_id)
             rel_path = os.path.join(log_folder, log_auction_name)
             self.log_auction = logging.getLogger(log_auction_name)
             filehandler = logging.FileHandler(rel_path + ".log", 'w')
@@ -85,6 +89,10 @@ class CDA(Model):
         self.surplus = defaultdict(float)
         self.quantity = defaultdict(float)
         self.efficiency = defaultdict(float)
+        self.spearman_correlation = defaultdict(float)
+        self.spearman_pvalue = defaultdict(float)
+        self.transaction_buy = []
+        self.transaction_sell = []
 
         # set up scheduler for auction
         self.schedule = RandomGS(self)
@@ -94,12 +102,15 @@ class CDA(Model):
         self.init_population()
         self.datacollector = DataCollector(
             model_reporters={
+                "ID": "unique_id",
                 "Period": "period",
                 "Efficiency": CDA.allocative_efficiency,
                 "Surplus": CDA.surplus_curr_period, 
                 "Quantity": CDA.quantity_curr_period,
-                "Price": CDA.last_transaction_price,
-                "Time": CDA.get_time
+                "Price": "transaction_price",
+                "Time": "time", 
+                "Spearman Correlation": CDA.get_spearman_corr,
+                "Spearman P-value": CDA.get_spearman_pvalue
             }, 
             agent_reporters={
                 "Quantity": "quantity",
@@ -177,23 +188,33 @@ class CDA(Model):
         """
         return self.quantity[self.period]
 
-    def last_transaction_price(self):
-        """
-        Returns the latest known transaction price
-        """
-        return self.transaction_price
-
     def allocative_efficiency(self):
         """
         Returns the allocative efficency for current period
         """
         return self.surplus_curr_period() / self.eq_surplus
 
-    def get_time(self):
+    def set_spearman_rank(self):
         """
-        Returns current time stamp
+        Calculates the spearman rank correlation for the current period
         """
-        return self.time
+        rank_buy = pd.Series(self.transaction_buy).rank(ascending=False)
+        rank_sell = pd.Series(self.transaction_sell).rank()
+        corr, p = spearmanr(rank_buy, rank_sell)
+        self.spearman_correlation[self.period] = corr
+        self.spearman_pvalue[self.period] = p
+
+    def get_spearman_corr(self):
+        """
+        Returns current spearman rank correlation
+        """
+        return self.spearman_correlation[self.period]
+
+    def get_spearman_pvalue(self):
+        """
+        Returns current spearman pvalue
+        """
+        return self.spearman_pvalue[self.period]
 
     def reset_bids(self):
         """
@@ -241,10 +262,14 @@ class CDA(Model):
         if agent.market_side == "buyer":
             self.transaction_price = self.best_ask
             seller = self.schedule.get_agent(self.best_ask_id)
+            self.transaction_buy.append(agent.get_price())
+            self.transaction_sell.append(seller.get_price())
             self.manage_order_transaction(agent, seller)
         else:
             self.transaction_price = self.best_bid
             buyer = self.schedule.get_agent(self.best_bid_id)
+            self.transaction_buy.append(buyer.get_price())
+            self.transaction_sell.append(agent.get_price())
             self.manage_order_transaction(buyer, agent)
 
         # reset outstanding bids and asks
@@ -255,16 +280,19 @@ class CDA(Model):
         Updates best bid or ask depending on the market side of agent and its
         newly offered price
         """
+
+        # update log
         if self.log:
             self.log_auction.info("BEFORE UPDATE OUTSTANDING BIDS")
             self.log_auction.info(self.get_info())
 
-        # update 
+        # update outstanding price
         if agent.market_side == "buyer":
             self.best_bid, self.best_bid_id = agent.offer, agent.unique_id
         else:
             self.best_ask, self.best_ask_id = agent.offer, agent.unique_id
 
+        # update log
         if self.log:
             self.log_auction.info("AFTER UPDATE OUTSTANDING BIDS")
             self.log_auction.info(self.get_info())
@@ -290,22 +318,18 @@ class CDA(Model):
         self.transaction_price = None
         self.best_bid, self.best_bid_id = 0, None
         self.best_ask, self.best_ask_id = math.inf, None
+        self.transaction_buy, self.transaction_sell = [],  [] 
         
         self.schedule.reset_agents()
 
     def step(self):
         """
-        Simulate step in auction
-        """
-        return self.schedule.step()
-
-    def run_model(self):
-        """
         Run auction.
         """
 
         # run auction for given amount of periods, each having the same total time
-        for self.period in range(self.periods):
+        descr = "period bar auction {} with ID {} and market {}".format(self.name, self.unique_id, self.market_id)
+        for self.period in pbar(range(self.periods), desc=descr):
             for self.time in range(self.total_time):
                 
                 # update log
@@ -314,7 +338,7 @@ class CDA(Model):
                     self.log_auction.info(self.get_info())
 
                 # update data if transaction is made during step
-                if self.step():
+                if self.schedule.step():
                     self.datacollector.collect(self)
                 
                 # update log
@@ -326,9 +350,10 @@ class CDA(Model):
                 if self.is_end_auction():
                     break
 
-            # update allocative efficiency for current period; 
             # reset auction for next period
+            self.set_spearman_rank()
             self.efficiency[self.period] = self.allocative_efficiency()
+            self.datacollector.collect(self)
             self.reset_period()
 
             # update log with final results period
@@ -341,3 +366,10 @@ class CDA(Model):
                         self.quantity[self.period]
                     )
                 )
+
+        self.running = False
+
+        data_model = self.datacollector.get_model_vars_dataframe()
+        data_agents = self.datacollector.get_agent_vars_dataframe()
+
+        return data_model, data_agents
