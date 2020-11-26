@@ -123,12 +123,19 @@ def determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_se
     """
     Determines the equlibrium for given sets of valuations
     """
+
+    # variable to keep track of surplus of market and others to assist in
+    # calculation equilibrium
     surplus = 0
     prev_buy, prev_sell = 0, 0
     prev_buy_left, prev_sell_left = 0, 0
+
+    # start calculation following the Marshalian path
     for i, (buy, sell) in enumerate(zip(prices_buy, prices_sell)):
         excess_demand_buy = demand_minus_supply(buy, all_prices_buy, all_prices_sell)
         
+        # if more buyers than sellers make sure that previous buyers sell their
+        # commodities first; keep track for next commodities
         if total_buyers > total_sellers:
             if prev_buy_left > 0:
                 surplus += (prev_buy - sell) * prev_buy_left
@@ -136,8 +143,9 @@ def determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_se
             trades = total_sellers - prev_buy_left
             prev_buy_left = total_buyers - trades
             prev_buy = buy
-            
-        elif total_buyers < total_sellers:
+        
+        # if equal amoun or more sellers (same story as above)
+        else:
             if prev_sell_left > 0:
                 surplus += (buy - prev_sell) * prev_sell_left
 
@@ -145,17 +153,31 @@ def determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_se
             prev_sell_left = total_sellers - trades
             prev_sell = sell
 
+        # update surplus market
         surplus += (buy - sell) * trades
 
+        # crosspoint demand and supply found, so equilbrium found and search can be stopped
         if excess_demand_buy >= 0:
-            return buy, demand(buy, all_prices_buy), surplus
+            q = demand(buy, all_prices_buy)
 
+            # determine equilbrium surplus for a buyer and seller in the market
+            buy_surplus, sell_surplus = 0, 0
+            for commodity in range(i + 1):
+                buy_surplus += prices_buy[commodity] - buy
+                sell_surplus += buy - prices_sell[commodity]
+
+            # return equilibrium values
+            return buy, q, surplus, buy_surplus, sell_surplus
+
+    # return empty equilibrium value, if something might have gone wrong
     return ()
 
 def save_prices(prices_buy, prices_sell, equilibrium, folder, market_id):
     """
     Saves the limit prices tot text file, so it can be re-used
     """
+
+    # save individual demand and supply schedules (limit prices) to text file
     os.makedirs(folder, exist_ok=True)
     filename = os.path.join(folder, "market_" + str(market_id) + ".txt")
     with open(filename, 'w') as f:
@@ -163,12 +185,15 @@ def save_prices(prices_buy, prices_sell, equilibrium, folder, market_id):
         for buy, sell in zip(prices_buy, prices_sell):
             f.write("{}\t{}\n".format(buy, sell))
 
+    # save equilbrium values to text file
     filename = os.path.join(folder, "equilibrium_market_" + str(market_id) + ".txt")
     with open(filename, 'w') as f:
-        price, quantity, surplus = equilibrium
+        price, quantity, surplus, buy_surplus, sell_surplus = equilibrium
         f.write("Price\t{}\n".format(price))
         f.write("Quantity\t{}\n".format(quantity))
         f.write("Surplus\t{}\n".format(surplus))
+        f.write("Buyer surplus\t{}\n".format(buy_surplus))
+        f.write("Seller surplus\t{}\n".format(sell_surplus))
 
 
 def plot_demand_supply(
@@ -197,12 +222,13 @@ def plot_demand_supply(
     plt.step(q_demand, prices_buy_copy, where="post", label="Demand")
     plt.step(q_supply, prices_sell_copy, where="post", label="Supply")
 
-    # determine ticks for labels
+    # determine xticks for labels
     if total_buyers <= total_sellers:
         plt.xticks([(x + 1) * total_buyers for x in range(commodities + 1)])
     else:
         plt.xticks([(x + 1) * total_sellers for x in range(commodities + 1)])
     
+    # determine yticks for labels
     if min_poss_price == 1:
         step = (max_poss_price - 0) // 5
         plt.yticks(list(range(0, max_poss_price + step, step)))

@@ -10,9 +10,15 @@ Name developers
 import os
 from multiprocessing import Pool, cpu_count
 
+import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from classes.auctions.cda_GS import CDA
+
+DPI = 300
+
+plt.style.use("seaborn-darkgrid")
 
 class CDARunner:
     """
@@ -26,7 +32,9 @@ class CDARunner:
         self.parameters = parameters
         self.save_output = save_output
 
-        name, market_id, _, _, _, _, _, _, _, _, _ = parameters
+        name, market_id, _, _, eq, params_model, _, _, _, _, _ = parameters
+        self.eq = eq
+        self.params_model = params_model
         folder = os.path.join("results", "data", name)
         os.makedirs(folder, exist_ok=True)
         self.filename = os.path.join(folder, "{}_market_{}".format(run_name,market_id))
@@ -50,40 +58,161 @@ class CDARunner:
         pool.join()
 
         if self.save_output:
-            self.save_data(pool_results)
+            dataframes = self.save_data(pool_results)
+            df_transactions = dataframes[0]
+            df_periods = dataframes[1]
+            df_agents = dataframes[2]
+            df_periods_agents = dataframes[3]
 
-    def plot_price_convergence(self):
-        """
-        Only plots price convergence of best and worst simulation 
-        based on allocative efficiency
-        """
-        pass
+            self.plot_price_convergence(df_transactions)
+            self.analyze_rmsd_prices(df_transactions)
+            mean_efficiency, mean_trade = self.efficiency_periods(df_periods)
+            mean_profit_dispersion = self.profit_dispersion(df_periods_agents)
+            self.equilibrium_stats(df_periods, mean_efficiency, mean_trade, mean_profit_dispersion)
 
-    def determine_stats(self):
+    def plot_price_convergence(self, df_transactions):
         """
-        Also need stats such as root mean squared deviation of transaction prices
-        from the equilibrium price averaged across the periods (transaction sequence number is x axis), 
-        profit dispersion (this can be measued at the agent directly as attribute; at least the sum)
+        Randomly selects one of the simulations to plot
         """
-        pass
 
-    def save_data(self, results):
+        # select data of a random simulation
+        random_sim = np.random.randint(0, self.N)
+        df = df_transactions[df_transactions["ID"] == random_sim]
+        name = self.filename + "_price_convergence.pdf"
+
+        # plot price convergence for each period
+        df = df.groupby("Period")
+        fig, axes = plt.subplots(ncols=df.ngroups, sharey=True, figsize=(15,3))
+        for i, (period, d) in enumerate(df):
+            ax = d.plot(x="Time", y="Price", ax=axes[i], title="Period {}".format(i + 1))
+            ax.axhline(self.eq[0], 0, self.params_model["total_time"], c="k", ls="--", lw=0.5)
+            ax.set_xlim(0, self.params_model["total_time"])
+            ax.set_ylim(self.params_model["min_price"] - 1, self.params_model["max_price"])
+            ax.legend().remove()
+        fig.tight_layout()
+
+        # save figure, plot it and then close it
+        fig.savefig(name, dpi=DPI)
+        # plt.show()
+        plt.close()
+
+    def analyze_rmsd_prices(self, df_transactions):
+        """
+        Plots the root mean squared deviation of the transaciton prices across
+        the quantity traded. Also saves the mean values to a csv
+        """
+
+        # try to retrieve the squared error
+        df_trans_grouped = df_transactions.groupby("Quantity")
+        rmse_mean = np.sqrt(df_trans_grouped["Squared error"].mean())
+
+        # save mean rmsd and make plot
+        rmse_mean.to_csv(self.filename + "_rmsd_prices.csv")
+        rmse_mean.plot(
+            x="Quantity", 
+            y="Squared error", 
+            title="Root Mean Squared Deviation of transaction prices"
+        )
+        plt.ylabel("Root Mean Squared Deviation")
+        plt.savefig(self.filename + "_rmsd_prices.pdf", dpi=DPI)
+        # plt.show()
+        plt.close()
+
+    def efficiency_periods(self, df_periods):
+        """
+        Saves the mean allocative efficiency across the periods and determines 
+        the overall mean allocative efficiency
+        """
+        mean_efficiency = df_periods["Efficiency"].mean()
+        df_periods_grouped = df_periods.groupby("Period")
+        mean_efficiency_periods = df_periods_grouped["Efficiency"].mean()
+        mean_efficiency_periods.to_csv(self.filename + "_efficiency_periods.csv")
+
+        mean_trade = df_periods["Trade ratio"].mean()
+        mean_trade_periods = df_periods_grouped["Trade ratio"].mean()
+        mean_trade_periods.to_csv(self.filename + "_traderatio_periods.csv")
+
+        # make plot
+        fig = plt.figure()
+        mean_efficiency_periods *= 100
+        mean_trade_periods *= 100
+        mean_efficiency_periods.plot(
+            x="Period",
+            y="Efficiency",
+            label="Efficiency"
+        )
+        mean_trade_periods.plot(
+            x="Periods", 
+            y="Trade ratio",
+            label="Trade ratio"
+        )
+        plt.ylabel("Percentage")
+        plt.xticks(mean_efficiency_periods.index)
+        plt.ylim(75, 110)
+        plt.legend()
+        plt.title("Periodwise allocative efficency and trade ratio")
+        fig.savefig(self.filename + "_efficiency_periods.pdf", dpi=DPI)
+        # plt.show()
+        plt.close(fig)
+
+        return mean_efficiency, mean_trade
+
+    def profit_dispersion(self, df_periods_agents):
+        """
+        Determinse the mean profit disperion periodwise and over all periods
+        """
+        df_grouped = df_periods_agents.groupby(["ID", "Period"])
+        mean_dispersion_agents = df_grouped["Profit dispersion"].mean()
+        mean_dispersion_periods = np.sqrt(mean_dispersion_agents.groupby("Period").mean())
+
+        mean_dispersion_periods.to_csv(self.filename + "_profitdispersion_periods.csv")
+        mean_profit_dispersion = mean_dispersion_periods.mean()
+
+        return mean_profit_dispersion
+
+    def equilibrium_stats(self, df_periods, mean_efficiency, mean_trade, mean_profit_dispersion):
+        """
+        """
+        mean_spearman = df_periods["Spearman Correlation"].mean()
+        mean_spearman_pvalue = df_periods["Spearman P-value"].mean()
+        
+        name = self.filename + "_general_stats.txt"
+        with open(name, 'w') as f:
+            f.write("efficiency={}\n".format(round(mean_efficiency, 3)))
+            f.write("trade ratio={}\n".format(round(mean_trade, 2)))
+            f.write("profit dispersion={}\n".format(round(mean_profit_dispersion, 2)))
+            f.write("spearman correlation={}\n".format(round(mean_spearman, 3)))
+            f.write("spearman p-value={}\n".format(round(mean_spearman_pvalue, 3)))
+
+    def save_data(self, pool_results):
         """
         Save data of all simulations to csv file
         """
-        data_model = [result[0] for result in results]
-        data_agents = [result[1] for result in results]
 
-        df_model = pd.concat(data_model)
-        name = self.filename + "_model.csv"
-        df_model.to_csv(name, 'w')
-        print(df_model.head())
-        print(df_model.tail())
-        print("===============================================================")
-
+        # seperate the data gathered from the simulations into different dataframes
+        data_transactions = [result[0] for result in pool_results]
+        data_periods = [result[1] for result in pool_results]
+        data_agents = [result[2] for result in pool_results]
+        data_periods_agents = [result[3] for result in pool_results]
+        df_transactions = pd.concat(data_transactions)
+        df_periods = pd.concat(data_periods)
         df_agents = pd.concat(data_agents)
+        df_periods_agents = pd.concat(data_periods_agents)
+
+        # save transactions to csv
+        name = self.filename + "_transactions.csv"
+        df_transactions.to_csv(name)
+
+        # save end-of-period data to csv
+        name = self.filename + "_periods.csv"
+        df_periods.to_csv(name)
+
+        # save data agents to csv
         name = self.filename + "_agents.csv"
-        df_agents.to_csv(name, 'w')
-        print(df_agents.head())
-        print(df_agents.tail())
-        print("===============================================================")
+        df_agents.to_csv(name)
+
+        # save data agents end of period
+        name = self.filename + "_periods_agents.csv"
+        df_periods_agents.to_csv(name)
+
+        return df_transactions, df_periods, df_agents, df_periods_agents

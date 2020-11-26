@@ -21,6 +21,12 @@ from tqdm import tqdm as pbar
 from classes.schedulers.schedules import RandomGS
 from classes.agents.zero_intelligence import ZI_buy, ZI_sell
 
+def trade_ratio(model):
+    """
+    Determines trade ration in a given period
+    """
+    return model.quantity_curr_period() / model.eq_quantity
+
 class CDA(Model):
     """
     Continuous Double Auction model as represented in Gode en Sunder (1993).
@@ -56,7 +62,11 @@ class CDA(Model):
         self.market_id = market_id
         self.prices_buy = prices_buy
         self.prices_sell = prices_sell
-        self.eq_price, self.eq_quantity, self.eq_surplus = equilibrium
+        self.eq_price = equilibrium[0]
+        self.eq_quantity = equilibrium[1]
+        self.eq_surplus = equilibrium[2]
+        self.eq_buyer_surplus = equilibrium[3]
+        self.eq_seller_surplus = equilibrium[4]
         self.min_poss_price = parameters["min_price"]
         self.max_poss_price = parameters["max_price"]
         self.min_limit, self.max_limit = parameters["min_limit"], parameters["max_limit"]
@@ -100,21 +110,41 @@ class CDA(Model):
 
         # intialize population and datacollector
         self.init_population()
-        self.datacollector = DataCollector(
+        self.datacollector_transactions = DataCollector(
+            model_reporters={
+                "ID": "unique_id",
+                "Period": "period",
+                "Surplus": CDA.surplus_curr_period, 
+                "Quantity": CDA.quantity_curr_period,
+                "Price": "transaction_price",
+                "Squared error": CDA.rmsd_transaction_price,
+                "Time": "time"
+            }, 
+            agent_reporters={
+                "ID": "model.unique_id",
+                "Period": "model.period",
+                "Quantity": "quantity",
+                "Surplus": "surplus", 
+                "Budget": "budget"
+            }
+        )
+
+        self.datacollector_periods = DataCollector(
             model_reporters={
                 "ID": "unique_id",
                 "Period": "period",
                 "Efficiency": CDA.allocative_efficiency,
-                "Surplus": CDA.surplus_curr_period, 
+                "Trade ratio": trade_ratio,
                 "Quantity": CDA.quantity_curr_period,
-                "Price": "transaction_price",
-                "Time": "time", 
                 "Spearman Correlation": CDA.get_spearman_corr,
                 "Spearman P-value": CDA.get_spearman_pvalue
-            }, 
+            },
             agent_reporters={
+                "ID": "model.unique_id",
+                "Period": "model.period",
                 "Quantity": "quantity",
-                "Surplus": "surplus", 
+                "Surplus": "surplus",
+                "Profit dispersion": "profit_dispersion",
                 "Budget": "budget"
             }
         )
@@ -165,7 +195,7 @@ class CDA(Model):
         """
 
         if strategy.upper() == "ZI":
-            return ZI_buy(self.next_id(), self, self.prices_buy)
+            return ZI_buy(self.next_id(), self, self.prices_buy, self.eq_buyer_surplus)
         # elif strategy.upper(0 == "KAPLAN"):
         #     return K
 
@@ -174,7 +204,7 @@ class CDA(Model):
         Create seller depending on its strategy and limit prices
         """
         if strategy.upper() == "ZI":
-            return ZI_sell(self.next_id(), self, self.prices_sell)
+            return ZI_sell(self.next_id(), self, self.prices_sell, self.eq_seller_surplus)
 
     def surplus_curr_period(self):
         """
@@ -215,6 +245,13 @@ class CDA(Model):
         Returns current spearman pvalue
         """
         return self.spearman_pvalue[self.period]
+
+    def rmsd_transaction_price(self):
+        """
+        Determines the root mean squared deviation of transaction prices
+        """
+        error = self.transaction_price - self.eq_price
+        return error * error
 
     def reset_bids(self):
         """
@@ -301,14 +338,18 @@ class CDA(Model):
         """
         Returns True if auction ended, False otherwise.
         """
+
+        # lowest limit price of sellers still in market
         min_sell = min([agent.get_price() for agent in self.schedule.agent_buffer() if agent.market_side == "seller"])
 
+        # tries to find buyer able to make trade with seller with lowers limit price
         for agent in self.schedule.agent_buffer():
             if agent.market_side == "buyer":
                 price, budget = agent.get_price(), agent.get_budget()
                 if price >= min_sell and budget >= min_sell:
                     return False
 
+        # if not found auction has ended
         return True
 
     def reset_period(self):
@@ -339,7 +380,7 @@ class CDA(Model):
 
                 # update data if transaction is made during step
                 if self.schedule.step():
-                    self.datacollector.collect(self)
+                    self.datacollector_transactions.collect(self)
                 
                 # update log
                 if self.log:
@@ -351,9 +392,11 @@ class CDA(Model):
                     break
 
             # reset auction for next period
+            self.schedule.set_profit_dispersion()
             self.set_spearman_rank()
             self.efficiency[self.period] = self.allocative_efficiency()
-            self.datacollector.collect(self)
+            self.datacollector_transactions.collect(self)
+            self.datacollector_periods.collect(self)
             self.reset_period()
 
             # update log with final results period
@@ -369,7 +412,10 @@ class CDA(Model):
 
         self.running = False
 
-        data_model = self.datacollector.get_model_vars_dataframe()
-        data_agents = self.datacollector.get_agent_vars_dataframe()
+        # update datacollectors with end of period information
+        data_transactions = self.datacollector_transactions.get_model_vars_dataframe()
+        data_periods = self.datacollector_periods.get_model_vars_dataframe()
+        data_agents = self.datacollector_transactions.get_agent_vars_dataframe()
+        data_periods_agents = self.datacollector_periods.get_agent_vars_dataframe()
 
-        return data_model, data_agents
+        return data_transactions, data_periods, data_agents, data_periods_agents

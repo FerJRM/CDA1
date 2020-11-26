@@ -29,10 +29,10 @@ def set_arguments():
         "N", type=int, help="amount of simulations"
     )
     parser.add_argument(
-        "--save_output", type=str2bool, default=True, help="save data transaction or not"
+        "--save_output", type=str2bool, default=True, help="save data transaction or not (default=True)"
     )
     parser.add_argument(
-        "--log", type=str2bool, default=True, help="run with logfile or not"
+        "--log", type=str2bool, default=True, help="run with logfile or not (default=True)"
     )
     
     args = parser.parse_args()

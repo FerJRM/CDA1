@@ -40,6 +40,13 @@ class RandomGS(BaseScheduler):
         for agent in self.agent_buffer():
             agent.reset_offer()
 
+    def set_profit_dispersion(self):
+        """
+        Set profit dispersion of each agent
+        """
+        for agent in self.agent_buffer():
+            agent.set_profit_dispersion()
+
     def reset_agents(self):
         """
         Resets all agents' attributes to their intial values and reset

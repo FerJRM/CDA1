@@ -16,13 +16,15 @@ class BasicAgent(Agent):
     market_side = "None"
     strategy = "None"
 
-    def __init__(self, unique_id, model, prices):
+    def __init__(self, unique_id, model, prices, eq_surplus):
         super().__init__(unique_id, model)
         self.prices = prices
         self.quantity = 0
         self.budget = sum(prices)
-        self.offer = 0
+        self.eq_surplus = eq_surplus
         self.surplus = 0
+        self.profit_dispersion = 0
+        self.offer = 0
         self.in_market = True
         self.active = True
         
@@ -85,6 +87,11 @@ class BasicAgent(Agent):
         Get budget.
         """
         return self.budget
+
+    def set_profit_dispersion(self):
+        """
+        """
+        self.profit_dispersion = (self.surplus - self.eq_surplus) ** 2
 
     def offer_price(self):
         """
@@ -182,8 +189,8 @@ class ZI_sell(BasicAgent):
     market_side = "seller"
     strategy = "ZI"
 
-    def __init__(self, unique_id, model, prices):
-        super().__init__(unique_id, model, prices)
+    def __init__(self, unique_id, model, prices, eq_surplus):
+        super().__init__(unique_id, model, prices, eq_surplus)
         self.budget = 0
         self.offer = math.inf
 
