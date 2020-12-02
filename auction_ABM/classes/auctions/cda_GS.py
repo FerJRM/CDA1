@@ -19,7 +19,8 @@ from mesa.datacollection import DataCollector
 from tqdm import tqdm as pbar
 
 from classes.schedulers.schedules import RandomGS
-from classes.agents.zero_intelligence import ZI_buy, ZI_sell
+from classes.agents.buyers import ZI_buy, ZI_C_buy, Kaplan_buy
+from classes.agents.sellers import ZI_sell, ZI_C_sell, Kaplan_sell
 
 def trade_ratio(model):
     """
@@ -34,8 +35,8 @@ class CDA(Model):
     """
     def __init__(
             self, unique_id, name, market_id, prices_buy, prices_sell, equilibrium, parameters, 
-            params_strategies={"ZI": {}}, total_buyers_strategies={"ZI": 10}, 
-            total_sellers_strategies={"ZI": 10}, save_output=False, log=True
+            params_strategies={"ZI_C": {}}, total_buyers_strategies={"ZI_C": 10}, 
+            total_sellers_strategies={"ZI_C": 10}, save_output=False, log=True
         ):
         """
         Initialize each model with:
@@ -96,6 +97,8 @@ class CDA(Model):
         self.transaction_price = None
         self.best_bid, self.best_bid_id = 0, None
         self.best_ask, self.best_ask_id = math.inf, None
+        self.max_trade, self.prev_max_trade = 0, math.inf
+        self.min_trade, self.prev_min_trade = math.inf, -math.inf
         self.surplus = defaultdict(float)
         self.quantity = defaultdict(float)
         self.efficiency = defaultdict(float)
@@ -103,6 +106,7 @@ class CDA(Model):
         self.spearman_pvalue = defaultdict(float)
         self.transaction_buy = []
         self.transaction_sell = []
+        self.no_transactions = 0
 
         # set up scheduler for auction
         self.schedule = RandomGS(self)
@@ -156,11 +160,13 @@ class CDA(Model):
         """
         return "Period: {}\nTime: {}\nBest Bid: {}\nBid ID: {}\n" \
             "Best Ask: {}\nAsk ID: {}\nLast Price: {}\n" \
-            "Surplus: {}\nQuantity: {}\n" \
+            "Surplus: {}\nQuantity: {}\nMin Trade: {}\nMin Trade Prev: {}\n" \
+            "Max Trade: {}\nMax Trade Prev: {}\n" \
             .format(
                 self.period, self.time, self.best_bid, self.best_bid_id, 
                 self.best_ask, self.best_ask_id, self.transaction_price, 
-                self.surplus_curr_period(), self.quantity_curr_period()
+                self.surplus_curr_period(), self.quantity_curr_period(),
+                self.min_trade, self.prev_min_trade, self.max_trade, self.prev_max_trade
             )
 
     def get_info_transaction(self, buyer, seller, buyer_surplus, seller_surplus):
@@ -193,11 +199,12 @@ class CDA(Model):
         """
         Create buyer depending on its strategy, limit prices
         """
-
         if strategy.upper() == "ZI":
             return ZI_buy(self.next_id(), self, self.prices_buy, self.eq_buyer_surplus)
-        # elif strategy.upper(0 == "KAPLAN"):
-        #     return K
+        elif strategy.upper() == "ZI_C":
+            return ZI_C_buy(self.next_id(), self, self.prices_buy, self.eq_buyer_surplus)
+        elif strategy.upper() == "KAPLAN":
+            return Kaplan_buy(self.next_id(), self, self.prices_buy, self.eq_buyer_surplus, params)
 
     def create_seller(self, strategy, params=None):
         """
@@ -205,6 +212,10 @@ class CDA(Model):
         """
         if strategy.upper() == "ZI":
             return ZI_sell(self.next_id(), self, self.prices_sell, self.eq_seller_surplus)
+        elif strategy.upper() == "ZI_C":
+            return ZI_C_sell(self.next_id(), self, self.prices_sell, self.eq_seller_surplus)
+        elif strategy.upper() == "KAPLAN":
+            return Kaplan_sell(self.next_id(), self, self.prices_sell, self.eq_seller_surplus, params)
 
     def surplus_curr_period(self):
         """
@@ -265,6 +276,18 @@ class CDA(Model):
         """
         self.best_ask, self.best_ask_id = math.inf, None
 
+    # def reset_no_transactions(self):
+    #     """
+    #     Resets the number of steps in which a transaction did not occur
+    #     """
+    #     self.no_transactions = 0
+
+    # def update_no_transactions(self):
+    #     """
+    #     Update the number of steps with no transactions
+    #     """
+    #     self.no_transactions += 1
+
     def is_trade_possible(self, agent):
         """
         Determines if trade is possible (best bid and ask crosses)
@@ -282,6 +305,15 @@ class CDA(Model):
         seller_surplus = seller.transaction_update(self.transaction_price)
         self.surplus[self.period] += buyer_surplus + seller_surplus
         self.quantity[self.period] += 1
+        self.schedule.update_no_transactions(buyer.unique_id, seller.unique_id)
+
+        # update min trading price
+        if self.transaction_price < self.min_trade:
+            self.min_trade = self.transaction_price
+
+        # update max trading prices
+        if self.transaction_price > self.max_trade:
+            self.max_trade = self.transaction_price
 
         if self.log:
             self.log_auction.info(self.get_info_transaction(buyer, seller, buyer_surplus, seller_surplus))
@@ -290,8 +322,6 @@ class CDA(Model):
         """
         Make exchange between agents
         """
-
-        # update log
         if self.log:
             self.log_auction.info("TRANSACTION POSSIBLE")
 
@@ -359,7 +389,10 @@ class CDA(Model):
         self.transaction_price = None
         self.best_bid, self.best_bid_id = 0, None
         self.best_ask, self.best_ask_id = math.inf, None
-        self.transaction_buy, self.transaction_sell = [],  [] 
+        self.prev_min_trade, self.prev_max_trade = self.min_trade, self.max_trade
+        self.min_trade, self.max_trade = math.inf, 0
+        self.transaction_buy, self.transaction_sell = [], []
+        self.no_transactions = 0
         
         self.schedule.reset_agents()
 
@@ -381,6 +414,10 @@ class CDA(Model):
                 # update data if transaction is made during step
                 if self.schedule.step():
                     self.datacollector_transactions.collect(self)
+                    self.no_transactions = 0
+                else:
+                    self.no_transactions += 1
+                    self.schedule.update_no_transactions()
                 
                 # update log
                 if self.log:

@@ -91,9 +91,8 @@ class CDARunner:
             ax.legend().remove()
         fig.tight_layout()
 
-        # save figure, plot it and then close it
+        # save figure and then close it
         fig.savefig(name, dpi=DPI)
-        # plt.show()
         plt.close()
 
     def analyze_rmsd_prices(self, df_transactions):
@@ -115,7 +114,6 @@ class CDARunner:
         )
         plt.ylabel("Root Mean Squared Deviation")
         plt.savefig(self.filename + "_rmsd_prices.pdf", dpi=DPI)
-        # plt.show()
         plt.close()
 
     def efficiency_periods(self, df_periods):
@@ -132,10 +130,17 @@ class CDARunner:
         mean_trade_periods = df_periods_grouped["Trade ratio"].mean()
         mean_trade_periods.to_csv(self.filename + "_traderatio_periods.csv")
 
-        # make plot
-        fig = plt.figure()
+        # determine y-limits
         mean_efficiency_periods *= 100
         mean_trade_periods *= 100
+        min_eff, max_eff = min(mean_efficiency_periods), max(mean_efficiency_periods)
+        min_trade, max_trade = min(mean_trade_periods), max(mean_trade_periods)
+
+        min_y = round(min_eff) - 10 if min_eff < min_trade else round(min_trade) - 10
+        max_y = round(max_eff) + 10 if max_eff > max_trade else round(max_trade) + 10
+
+        # make plot
+        fig = plt.figure()
         mean_efficiency_periods.plot(
             x="Period",
             y="Efficiency",
@@ -148,11 +153,10 @@ class CDARunner:
         )
         plt.ylabel("Percentage")
         plt.xticks(mean_efficiency_periods.index)
-        plt.ylim(75, 110)
+        plt.ylim(min_y, max_y)
         plt.legend()
         plt.title("Periodwise allocative efficency and trade ratio")
         fig.savefig(self.filename + "_efficiency_periods.pdf", dpi=DPI)
-        # plt.show()
         plt.close(fig)
 
         return mean_efficiency, mean_trade

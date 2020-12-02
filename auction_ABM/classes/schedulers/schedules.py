@@ -40,6 +40,26 @@ class RandomGS(BaseScheduler):
         for agent in self.agent_buffer():
             agent.reset_offer()
 
+    def update_no_transactions(self, buyer_id=-1, seller_id=-1):
+        """
+        Update the number of steps in which no transaction occur for each
+        agent in double auction except those that made a transaction
+        """
+        for agent in self.agent_buffer():
+            if agent.unique_id != buyer_id and agent.unique_id != seller_id:
+                agent.update_no_transactions()
+            else:
+                agent.reset_no_transactions()
+
+    # def reset_no_transactions(self, buyer_id=-1, seller_id=-1):
+    #     """
+    #     Reset the number of steps in whicn no transaction occur for the two
+    #     agents that just made a transaction (found by their id)
+    #     """
+    #     for agent in self.agent_buffer():
+    #         if agent.unique_id == buyer_id or agent.unique_id == seller_id:
+    #             agent.reset_no_transactions()
+
     def set_profit_dispersion(self):
         """
         Set profit dispersion of each agent
