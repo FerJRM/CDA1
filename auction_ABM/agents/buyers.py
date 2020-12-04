@@ -12,21 +12,24 @@ import random
 
 from mesa import Agent
 
-class ZI_sell(Agent):
-    market_side = "seller"
+class ZI_buy(Agent):
+    market_side = "buyer"
     strategy = "ZI"
 
     def __init__(self, unique_id, model, prices, eq_surplus):
         super().__init__(unique_id, model)
         self.prices = prices
         self.quantity = 0
-        self.budget = 0
+        self.prev_quantity = 0
+        self.budget = sum(prices)
         self.eq_surplus = eq_surplus
         self.surplus = 0
+        self.prev_surplus = 0
         self.profit_dispersion = 0
-        self.offer = math.inf
+        self.offer = 0
         self.in_market = True
         self.active = True
+        self.can_shout = True
         self.no_transactions = 0
 
     def get_info(self):
@@ -65,7 +68,7 @@ class ZI_sell(Agent):
         """
         Determines if buyer is active (can shout price)
         """
-        self.active = self.model.best_ask > self.model.min_poss_price
+        self.active = self.model.best_bid < self.model.max_poss_price
 
     def is_active(self):
         """
@@ -81,7 +84,7 @@ class ZI_sell(Agent):
         if self.still_commodities():
             return self.prices[self.quantity]
         
-        return math.inf
+        return 0
 
     def get_budget(self):
         """
@@ -110,19 +113,17 @@ class ZI_sell(Agent):
         """
         Shouts price.
         """
-        if self.model.best_ask == math.inf:
-            self.offer = random.randint(self.model.min_poss_price, self.model.max_poss_price)
-        else:
-            self.offer = random.randint(self.model.min_poss_price, self.model.best_ask - 1)
+        self.offer = random.randint(self.model.best_bid + 1, self.model.max_poss_price)
+        return self.offer
 
     def transaction_update(self, price):
         """
         Update surplus, quantity bought, budget and price index for a certain
         transaction price
         """
-        surplus = price - self.prices[self.quantity]
+        surplus = self.prices[self.quantity] - price
         self.surplus += surplus
-        self.budget += price
+        self.budget -= price
         self.quantity += 1
 
         return surplus
@@ -131,15 +132,17 @@ class ZI_sell(Agent):
         """
         Reset offer to initial value.
         """
-        self.offer = math.inf
+        self.offer = 0
 
     def reset_agent(self):
         """
         Resets attributes agents to initial values
         """
+        self.prev_quantity = self.quantity
         self.quantity = 0
-        self.budget = 0
-        self.offer = math.inf
+        self.budget = sum(self.prices)
+        self.offer = 0
+        self.prev_surplus = self.surplus
         self.surplus = 0
         self.in_market = True
         self.active = True
@@ -149,34 +152,50 @@ class ZI_sell(Agent):
         """
         Perform one action (step) in the auction for the agent
         """
-        self.offer_price()
-
-class ZI_C_sell(ZI_sell):
+        return self.offer_price()
+    
+class ZI_C_buy(ZI_buy):
     """
     An Zero Intelligence Constrained agent as described by Gode & Sunder (1993).
-    Note, it acts as a seller in a double auction
+    Note, it acts as a buyer in a double auction
     """
-    market_side = "seller"
+    market_side = "buyer"
     strategy = "ZI_C"
 
+    def willing_to_shout(self):
+        """
+        Determines if the buyer is willing to shout
+        """
+        is_endowed =  self.prices[self.quantity] > self.model.best_bid
+        enough_budget = self.model.best_bid < self.budget
+        self.can_shout = is_endowed and enough_budget
+
     def set_activity(self):
+        """
+        Checks if buyer can make offer thats within budget contraint and
+        without losses
+        """
         if self.still_commodities():
-            self.active = self.prices[self.quantity] < self.model.best_ask
+            self.willing_to_shout()
+            self.active = self.can_shout
         else:
             self.active = False
 
     def offer_price(self):
+        """
+        Generates a random bod between the limit price/budget and current best bid
+        """
         valuation = self.prices[self.quantity]
-        if self.model.best_ask == math.inf:
-            self.offer = random.randint(valuation, self.model.max_poss_price)
-        else:
-            self.offer = random.randint(valuation, self.model.best_ask - 1)
+        max_bid = valuation if self.budget > valuation else self.budget
+        self.offer = random.randint(self.model.best_bid + 1, max_bid)
 
-class Kaplan_sell(ZI_C_sell):
+        return self.offer
+
+class Kaplan_buy(ZI_C_buy):
     """
     Implementation of an Kaplan agent (Rust, Palm & Miller, 1993)
     """
-    market_side = "seller"
+    market_side = "buyer"
     strategy = "KAPLAN"
 
     def __init__(self, unique_id, model, prices, eq_surplus, params):
@@ -216,41 +235,45 @@ class Kaplan_sell(ZI_C_sell):
 
     def willing_to_shout(self):
         """
-        Determines if the seller is willing to shout
+        Determines if the buyer is willing to shout
         """
-        best_bid = self.model.best_bid
+        best_ask = self.model.best_ask
         if self.quantity != len(self.prices) - 1:
             next_token = self.prices[self.quantity + 1]
         else:
             next_token = self.prices[self.quantity]
 
-        if best_bid != 0:
-            self.most = max(best_bid, next_token + 1)
+        if best_ask != math.inf:
+            self.most = min(best_ask, next_token - 1)
+            # is_better_bid = self.most > self.model.best_bid
+            # if not is_better_bid and self.prices[self.quantity] - 1 > self.model.best_bid:
+            #     self.most = self.prices[self.quantity] - 1
         else:
-            self.most = next_token + 1
+            self.most = next_token - 1
 
-        is_better_ask = self.most < self.model.best_ask
-        is_endowed =  self.prices[self.quantity] <= self.most
-        # self.can_shout = is_better_ask and is_endowed
-        return is_better_ask and is_endowed
+        is_better_bid = self.most > self.model.best_bid
+        is_endowed =  self.prices[self.quantity] >= self.most
+        enough_budget = self.most <= self.budget
+        # self.can_shout = is_better_bid and is_endowed and enough_budget
+        return is_better_bid and is_endowed and enough_budget     
 
     def is_juicy_offer(self):
         """
         Determines if the best ask is less than the minimum trade price trade 
         price in the previous period.
         """
-        # self.juicy_offer = self.model.best_bid > self.model.prev_max_trade
-        return self.model.best_bid > self.model.prev_max_trade
+        # self.juicy_offer = self.model.best_ask < self.model.prev_min_trade
+        return self.model.best_ask < self.model.prev_min_trade
 
     def is_small_spread(self):
         """
         Determines if reasonalbe offer has been made, bid-ask spread is small enough
         and the expected profit is sufficient.
         """
-        reasonable_offer = self.model.best_bid > self.model.prev_min_trade
-        small_spread = self.model.best_ask - self.model.best_bid < self.spread_ratio * self.model.best_bid
-        valuation  = self.prices[self.quantity]
-        expected_profit = self.model.best_bid - valuation > (1 + self.profit_perc) * valuation
+        reasonable_offer = self.model.best_ask < self.model.prev_max_trade
+        small_spread = self.model.best_ask - self.model.best_bid < self.spread_ratio * self.model.best_ask
+        valuation = self.prices[self.quantity]
+        expected_profit = valuation - self.model.best_ask > (1 - self.profit_perc) * valuation
         # self.small_spread = reasonable_offer and small_spread and expected_profit
         return reasonable_offer and small_spread and expected_profit
 
@@ -273,22 +296,22 @@ class Kaplan_sell(ZI_C_sell):
 
     def set_activity(self):
         """
-        Checks if seller can make offer thats within budget contraint and
+        Checks if buyer can make offer thats within budget contraint and
         without losses
         """
-        if self.model.best_ask != math.inf:
+        if self.model.best_bid != 0:
             can_shout = self.willing_to_shout()
             juicy_offer = self.is_juicy_offer()
             small_spread = self.is_small_spread()
             time_out = self.is_time_out()
             truthteller = self.is_truthteller()
-            self.active = can_shout and (juicy_offer or small_spread or time_out or truthteller)
             self.can_shout = can_shout
             self.juicy_offer = juicy_offer
             self.small_spread = small_spread
             self.time_out = time_out
             self.truthtelling = truthteller
             # self.active = self.can_shout and (self.juicy_offer or self.small_spread or self.time_out)
+            self.active = can_shout and (juicy_offer or small_spread or time_out or truthteller)
         else:
             self.active = True
 
@@ -296,16 +319,18 @@ class Kaplan_sell(ZI_C_sell):
         """
         Generates a bid
         """
-        if self.model.best_ask != math.inf:
-            self.offer = max(self.model.best_bid, self.most)
+        if self.model.best_bid != 0:
+            self.offer = min(self.model.best_ask, self.most)
         else:
-            self.offer = self.model.max_poss_price
+            self.offer = self.model.min_poss_price
+
+        return self.offer
 
     def reset_offer(self):
         """
         Reset offer to initial value.
         """
-        self.offer = math.inf
+        self.offer = 0
         self.most = None
 
     def reset_agent(self):

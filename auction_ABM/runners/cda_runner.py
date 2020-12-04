@@ -14,7 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from classes.auctions.cda_GS import CDA
+from auctions.cda_GS import CDA
+from auctions.evo_cda_GS import EvoCDA
 
 DPI = 300
 
@@ -24,10 +25,11 @@ class CDARunner:
     """
     Object to manage multiple runs in parallel for a specific set of parameters.
     """
-    def __init__(self, run_name, N, parameters, save_output=True):
+    def __init__(self, run_name, cda_type, N, parameters, save_output=True):
         """
         Initialize runner
         """
+        self.cda_type = cda_type
         self.N = N
         self.parameters = parameters
         self.save_output = save_output
@@ -44,7 +46,11 @@ class CDARunner:
         Custom function to intialize a single auction object for a given set of 
         parameters and to run a single simulation.
         """
-        auction = CDA(*parameters)
+        if self.cda_type == "cda":
+            auction = CDA(*parameters)
+        elif self.cda_type == "evo cda":
+            auction = EvoCDA(*parameters)
+            
         return auction.step()
 
     def run_all(self):
@@ -64,11 +70,60 @@ class CDARunner:
             df_agents = dataframes[2]
             df_periods_agents = dataframes[3]
 
+            if self.cda_type == "evo cda":
+                df_evo = dataframes[4]
+                print(df_evo)
+
             self.plot_price_convergence(df_transactions)
             self.analyze_rmsd_prices(df_transactions)
             mean_efficiency, mean_trade = self.efficiency_periods(df_periods)
+
+            ## ADJUST THE PROFIT DISPERSION BECAUSE DF ONLY HAS INFO ABOUT THE LAST PERIOD
             mean_profit_dispersion = self.profit_dispersion(df_periods_agents)
+
             self.equilibrium_stats(df_periods, mean_efficiency, mean_trade, mean_profit_dispersion)
+
+    def save_data(self, pool_results):
+        """
+        Save data of all simulations to csv file
+        """
+
+        # seperate the data gathered from the simulations into different dataframes
+        data_transactions = [result[0] for result in pool_results]
+        data_periods = [result[1] for result in pool_results]
+        data_agents = [result[2] for result in pool_results]
+        data_periods_agents = [result[3] for result in pool_results]
+        df_transactions = pd.concat(data_transactions)
+        df_periods = pd.concat(data_periods)
+        df_agents = pd.concat(data_agents)
+        df_periods_agents = pd.concat(data_periods_agents)
+
+        if self.cda_type == "evo cda":
+            data_evo = [result[4] for result in pool_results]
+            df_evo = pd.concat(data_evo)
+            name = self.filename + "evo_process.csv"
+            df_evo.to_csv(name)
+
+        # save transactions to csv
+        name = self.filename + "_transactions.csv"
+        df_transactions.to_csv(name)
+
+        # save end-of-period data to csv
+        name = self.filename + "_periods.csv"
+        df_periods.to_csv(name)
+
+        # save data agents to csv
+        name = self.filename + "_agents.csv"
+        df_agents.to_csv(name)
+
+        # save data agents end of period
+        name = self.filename + "_periods_agents.csv"
+        df_periods_agents.to_csv(name)
+
+        if self.cda_type == "evo cda":
+            return df_transactions, df_periods, df_agents, df_periods_agents, df_evo
+
+        return df_transactions, df_periods, df_agents, df_periods_agents
 
     def plot_price_convergence(self, df_transactions):
         """
@@ -187,36 +242,3 @@ class CDARunner:
             f.write("profit dispersion={}\n".format(round(mean_profit_dispersion, 2)))
             f.write("spearman correlation={}\n".format(round(mean_spearman, 3)))
             f.write("spearman p-value={}\n".format(round(mean_spearman_pvalue, 3)))
-
-    def save_data(self, pool_results):
-        """
-        Save data of all simulations to csv file
-        """
-
-        # seperate the data gathered from the simulations into different dataframes
-        data_transactions = [result[0] for result in pool_results]
-        data_periods = [result[1] for result in pool_results]
-        data_agents = [result[2] for result in pool_results]
-        data_periods_agents = [result[3] for result in pool_results]
-        df_transactions = pd.concat(data_transactions)
-        df_periods = pd.concat(data_periods)
-        df_agents = pd.concat(data_agents)
-        df_periods_agents = pd.concat(data_periods_agents)
-
-        # save transactions to csv
-        name = self.filename + "_transactions.csv"
-        df_transactions.to_csv(name)
-
-        # save end-of-period data to csv
-        name = self.filename + "_periods.csv"
-        df_periods.to_csv(name)
-
-        # save data agents to csv
-        name = self.filename + "_agents.csv"
-        df_agents.to_csv(name)
-
-        # save data agents end of period
-        name = self.filename + "_periods_agents.csv"
-        df_periods_agents.to_csv(name)
-
-        return df_transactions, df_periods, df_agents, df_periods_agents

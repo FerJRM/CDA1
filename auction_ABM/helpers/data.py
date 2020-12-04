@@ -56,11 +56,11 @@ def load_parameters(name):
         for line in f:
             if "=" not in line and line != "\n":
                 strategy = line.rstrip("\n")
-                params_strategies[strategy] = {}
+                params_strategies[strategy.upper()] = {}
             elif "=" in line:
                 line = line.rstrip("\n")
                 param, value = line.split("=")
-                params_strategies[strategy][param] = float(value)
+                params_strategies[strategy.upper()][param] = float(value)
 
     total_buyers_strategies, total_sellers_strategies = {}, {}
     with open(distr_file, 'r') as f:
@@ -71,11 +71,11 @@ def load_parameters(name):
             elif "=" in line and "buyers" in line:
                 line = line.rstrip("\n")
                 _, buyers = line.split("=")
-                total_buyers_strategies[strategy] = int(buyers)
+                total_buyers_strategies[strategy.upper()] = int(buyers)
             elif "=" in line and "sellers" in line:
                 line = line.rstrip("\n")
                 _, sellers = line.split("=")
-                total_sellers_strategies[strategy] = int(sellers)
+                total_sellers_strategies[strategy.upper()] = int(sellers)
 
     model_params = {}
     with open(auction_file, 'r') as f:

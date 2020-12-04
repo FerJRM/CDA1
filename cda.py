@@ -12,15 +12,17 @@ sys.path.insert(0, "auction_ABM")
 
 import matplotlib.pyplot as plt
 
-from helpers.cmd_cda import set_arguments
-from helpers.data import load_demand_supply, load_parameters
-from classes.runners.cda_runner import CDARunner
+from auction_ABM.helpers.cmd_cda import set_arguments
+from auction_ABM.helpers.data import load_demand_supply, load_parameters
+from auction_ABM.runners.cda_runner import CDARunner
+# from auction_ABM.auctions.evo_cda_GS import EvoCDA
+# from auction_ABM import set_arguments
 
 if __name__ == "__main__":
 
     # retrieve command-line arguments, load demand and supply schedule 
     # and parameters model
-    name, market_id, N, save_output, log = set_arguments()
+    name, market_id, cda_type, N, save_output, log = set_arguments()
     prices_buy, prices_sell, eq = load_demand_supply(name, market_id)
     params = load_parameters(name)
     params_strats, total_buyers_strats, total_sellers_strats, params_model = params
@@ -29,7 +31,7 @@ if __name__ == "__main__":
         total_buyers_strats, total_sellers_strats, save_output, log
     )
 
-    cda_run = CDARunner(name, N, cda_params, save_output=save_output)
+    cda_run = CDARunner(name, cda_type, N, cda_params, save_output=save_output)
     cda_run.run_all()
 
     # # plot price convergence for each period

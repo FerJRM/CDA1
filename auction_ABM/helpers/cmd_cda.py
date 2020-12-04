@@ -26,6 +26,9 @@ def set_arguments():
         "market_id", type=int, help="id of market of the given simulation to to run"
     )
     parser.add_argument(
+        "cda_type", type=str, choices=["cda", "evo cda"], help="type of cda market to run"
+    )
+    parser.add_argument(
         "N", type=int, help="amount of simulations"
     )
     parser.add_argument(
@@ -42,7 +45,7 @@ def set_arguments():
             "and market id: {}".format(args.name, args.market_id)
             )
 
-    return args.name, args.market_id, args.N, args.save_output, args.log
+    return args.name, args.market_id, args.cda_type, args.N, args.save_output, args.log
 
 def str2bool(v):
     """

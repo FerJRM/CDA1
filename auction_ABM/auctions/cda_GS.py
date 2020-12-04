@@ -18,15 +18,53 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from tqdm import tqdm as pbar
 
-from classes.schedulers.schedules import RandomGS
-from classes.agents.buyers import ZI_buy, ZI_C_buy, Kaplan_buy
-from classes.agents.sellers import ZI_sell, ZI_C_sell, Kaplan_sell
+from schedulers.schedules import RandomGS
+from agents.buyers import ZI_buy, ZI_C_buy, Kaplan_buy
+from agents.sellers import ZI_sell, ZI_C_sell, Kaplan_sell
+
+
+def surplus_curr_period(model):
+    """
+    Returns surplus of current period
+    """
+    return model.surplus[model.period]
+
+def quantity_curr_period(model):
+    """
+    Returns quantity traded in current period
+    """
+    return model.quantity[model.period]
 
 def trade_ratio(model):
     """
     Determines trade ration in a given period
     """
-    return model.quantity_curr_period() / model.eq_quantity
+    return quantity_curr_period(model) / model.eq_quantity
+
+def rmsd_transaction_price(model):
+    """
+    Determines the root mean squared deviation of transaction prices
+    """
+    error = model.transaction_price - model.eq_price
+    return error * error
+
+def allocative_efficiency(model):
+    """
+    Returns the allocative efficency for current period
+    """
+    return surplus_curr_period(model) / model.eq_surplus
+
+def get_spearman_corr(model):
+    """
+    Returns current spearman rank correlation
+    """
+    return model.spearman_correlation[model.period]
+
+def get_spearman_pvalue(model):
+    """
+    Returns current spearman pvalue
+    """
+    return model.spearman_pvalue[model.period]
 
 class CDA(Model):
     """
@@ -55,7 +93,7 @@ class CDA(Model):
         save_output: boolean to indicate if data of transactions should be saved (bool)
         log: boolean to indicate if important steps in simulation should be logged (bool)
         """
-        super().__init__(self)
+        super().__init__()
         
         # initialize given attributes
         self.unique_id = unique_id
@@ -108,20 +146,18 @@ class CDA(Model):
         self.transaction_sell = []
         self.no_transactions = 0
 
-        # set up scheduler for auction
-        self.schedule = RandomGS(self)
-        self.running = True
-
-        # intialize population and datacollector
+        # set up scheduler for auction and initialize population
         self.init_population()
+
+        # intialize datacollector to keep track of data during the simulation
         self.datacollector_transactions = DataCollector(
             model_reporters={
                 "ID": "unique_id",
                 "Period": "period",
-                "Surplus": CDA.surplus_curr_period, 
-                "Quantity": CDA.quantity_curr_period,
+                "Surplus": surplus_curr_period, 
+                "Quantity": quantity_curr_period,
                 "Price": "transaction_price",
-                "Squared error": CDA.rmsd_transaction_price,
+                "Squared error": rmsd_transaction_price,
                 "Time": "time"
             }, 
             agent_reporters={
@@ -137,11 +173,11 @@ class CDA(Model):
             model_reporters={
                 "ID": "unique_id",
                 "Period": "period",
-                "Efficiency": CDA.allocative_efficiency,
+                "Efficiency": allocative_efficiency,
                 "Trade ratio": trade_ratio,
-                "Quantity": CDA.quantity_curr_period,
-                "Spearman Correlation": CDA.get_spearman_corr,
-                "Spearman P-value": CDA.get_spearman_pvalue
+                "Quantity": quantity_curr_period,
+                "Spearman Correlation": get_spearman_corr,
+                "Spearman P-value": get_spearman_pvalue
             },
             agent_reporters={
                 "ID": "model.unique_id",
@@ -165,7 +201,7 @@ class CDA(Model):
             .format(
                 self.period, self.time, self.best_bid, self.best_bid_id, 
                 self.best_ask, self.best_ask_id, self.transaction_price, 
-                self.surplus_curr_period(), self.quantity_curr_period(),
+                surplus_curr_period(self), quantity_curr_period(self),
                 self.min_trade, self.prev_min_trade, self.max_trade, self.prev_max_trade
             )
 
@@ -184,6 +220,8 @@ class CDA(Model):
         """
         Initialize population of traders
         """
+        self.schedule = RandomGS(self)
+        self.running = True
         
         for strategy, buyers in self.buyers_strats.items():
             for _ in range(buyers):
@@ -217,24 +255,6 @@ class CDA(Model):
         elif strategy.upper() == "KAPLAN":
             return Kaplan_sell(self.next_id(), self, self.prices_sell, self.eq_seller_surplus, params)
 
-    def surplus_curr_period(self):
-        """
-        Returns surplus of current period
-        """
-        return self.surplus[self.period]
-
-    def quantity_curr_period(self):
-        """
-        Returns quantity traded in current period
-        """
-        return self.quantity[self.period]
-
-    def allocative_efficiency(self):
-        """
-        Returns the allocative efficency for current period
-        """
-        return self.surplus_curr_period() / self.eq_surplus
-
     def set_spearman_rank(self):
         """
         Calculates the spearman rank correlation for the current period
@@ -244,25 +264,6 @@ class CDA(Model):
         corr, p = spearmanr(rank_buy, rank_sell)
         self.spearman_correlation[self.period] = corr
         self.spearman_pvalue[self.period] = p
-
-    def get_spearman_corr(self):
-        """
-        Returns current spearman rank correlation
-        """
-        return self.spearman_correlation[self.period]
-
-    def get_spearman_pvalue(self):
-        """
-        Returns current spearman pvalue
-        """
-        return self.spearman_pvalue[self.period]
-
-    def rmsd_transaction_price(self):
-        """
-        Determines the root mean squared deviation of transaction prices
-        """
-        error = self.transaction_price - self.eq_price
-        return error * error
 
     def reset_bids(self):
         """
@@ -275,18 +276,6 @@ class CDA(Model):
         Resets outstanding ask and id
         """
         self.best_ask, self.best_ask_id = math.inf, None
-
-    # def reset_no_transactions(self):
-    #     """
-    #     Resets the number of steps in which a transaction did not occur
-    #     """
-    #     self.no_transactions = 0
-
-    # def update_no_transactions(self):
-    #     """
-    #     Update the number of steps with no transactions
-    #     """
-    #     self.no_transactions += 1
 
     def is_trade_possible(self, agent):
         """
@@ -431,7 +420,7 @@ class CDA(Model):
             # reset auction for next period
             self.schedule.set_profit_dispersion()
             self.set_spearman_rank()
-            self.efficiency[self.period] = self.allocative_efficiency()
+            self.efficiency[self.period] = allocative_efficiency(self)
             self.datacollector_transactions.collect(self)
             self.datacollector_periods.collect(self)
             self.reset_period()
