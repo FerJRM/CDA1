@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from auctions.cda_GS import CDA
-from auctions.evo_cda_GS import EvoCDA
+from auction_ABM.auctions.cda_GS import CDA
+from auction_ABM.auctions.evo_cda_GS import EvoCDA
 
 DPI = 300
 

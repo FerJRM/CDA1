@@ -7,10 +7,8 @@ Description of file
 Name developers
 """
 
-# from collections import defaultdict
-
-from .cda_GS import * 
-from schedulers.schedules import EvoRandomGS
+from auction_ABM.auctions.cda_GS import * 
+from auction_ABM.schedulers.schedules import EvoRandomGS
 
 class EvoCDA(CDA):
     def __init__(
@@ -26,7 +24,6 @@ class EvoCDA(CDA):
         )
 
         # additional attributes for evolutionary development
-        self.all_strategies = list(params_strategies.keys())
         self.evo_process = []
         self.periods_no_switches = 0
 
@@ -82,6 +79,13 @@ class EvoCDA(CDA):
 
         self.evo_process.append(info)
 
+    def pop_has_converged(self):
+        """
+        Determines if the popolution has converged towards an equilibrium of
+        strategies (not necesarily a Nash equilibrium)
+        """
+        return self.periods_no_switches > 15
+
     def step(self):
         """
         Run auction.
@@ -99,6 +103,9 @@ class EvoCDA(CDA):
 
                 # update data if transaction is made during step
                 if self.schedule.step():
+                    # other_agent = self.make_trade(agent)
+                    self.reset_asks(), self.reset_bids()
+                    self.schedule.reset_offers_agents()
                     self.datacollector_transactions.collect(self)
                     self.no_transactions = 0
                 else:
@@ -133,6 +140,11 @@ class EvoCDA(CDA):
                         self.quantity[self.period]
                     )
                 )
+
+            # end run if population has converged
+            if self.pop_has_converged():
+                print("POPULATION HAS CONVERGED")
+                break
 
         self.running = False
 

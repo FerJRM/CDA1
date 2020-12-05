@@ -60,7 +60,11 @@ def load_parameters(name):
             elif "=" in line:
                 line = line.rstrip("\n")
                 param, value = line.split("=")
-                params_strategies[strategy.upper()][param] = float(value)
+                if "," not in value:
+                    params_strategies[strategy.upper()][param] = float(value)
+                else:
+                    value_tuple = tuple(float(x.strip()) for x in value.split(","))
+                    params_strategies[strategy.upper()][param] = value_tuple
 
     total_buyers_strategies, total_sellers_strategies = {}, {}
     with open(distr_file, 'r') as f:

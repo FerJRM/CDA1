@@ -63,11 +63,17 @@ class ZI_sell(Agent):
         """
         return self.in_market
 
+    def willing_to_shout(self):
+        """
+        Determines if the seller is willing to shout
+        """
+        return True
+
     def set_activity(self):
         """
         Determines if buyer is active (can shout price)
         """
-        self.active = self.model.best_ask > self.model.min_poss_price
+        self.active = self.willing_to_shout()
 
     def is_active(self):
         """
@@ -131,6 +137,13 @@ class ZI_sell(Agent):
 
         return surplus
 
+    def update_params(self):
+        """
+        Update the parameters of the agent after a time step in 
+        a double auction
+        """
+        pass
+
     def reset_offer(self):
         """
         Reset offer to initial value.
@@ -165,9 +178,15 @@ class ZI_C_sell(ZI_sell):
     market_side = "seller"
     strategy = "ZI_C"
 
+    def willing_to_shout(self):
+        """
+        Determines if the seller is willing to shout
+        """
+        return self.prices[self.quantity] < self.model.best_ask
+
     def set_activity(self):
         if self.still_commodities():
-            self.active = self.prices[self.quantity] < self.model.best_ask
+            self.active = self.willing_to_shout()
         else:
             self.active = False
 
@@ -180,7 +199,114 @@ class ZI_C_sell(ZI_sell):
 
         return self.offer
 
-class Kaplan_sell(ZI_C_sell):
+class ZIP_sell(ZI_C_sell):
+    """
+    ZIP trader for double auction as described by Cliff D. & Bruten J. (1997)
+    """
+    market_side = "seller"
+    strategy = "ZIP"
+
+    def __init__(self, unique_id, model, prices, eq_surplus, params):
+        super().__init__(unique_id, model, prices, eq_surplus)
+        self.profit_margin = random.uniform(*params["profit_margin_sellers"])
+        self.learning_rate = random.uniform(*params["learning_rate"])
+        self.momentum_coeff = random.uniform(*params["momentum_coeff"])
+        self.momentum = 0
+        self.decreasing_rel_target = params["decreasing_rel_target"]
+        self.increasing_rel_target = params["increasing_rel_target"]
+        self.decreasing_abs_target = params["decreasing_abs_target"]
+        self.increasing_abs_target = params["increasing_abs_target"]
+
+    def get_info(self):
+        """
+        Returns a formatted string containing the current state of agent
+        """
+        return f"==============================================" \
+            f"\nID: {self.unique_id} " \
+            f"\nAgent: {self.strategy} " \
+            f"\nSide: {self.market_side} " \
+            f"\nValuation: {self.prices[self.quantity]} " \
+            f"\nOffer: {self.offer} " \
+            f"\nQuantity: {self.quantity} " \
+            f"\nBudget: {self.budget}" \
+            f"\nProfit margin: {self.profit_margin}" \
+            f"\nLearning rate: {self.learning_rate}" \
+            f"\nMomentum coeffiecient: {self.momentum_coeff}" \
+            f"\nMomentum: {self.momentum}" \
+            f"\n================================================="
+
+    def offer_price(self):
+        """
+        Generates an ask
+        """
+        self.offer = int(round(self.prices[self.quantity] * (1 + self.profit_margin)))
+        return self.offer
+
+    def margin_within_bounds(self):
+        """
+        Ensures that profit margin is within bounds
+        """
+        if self.profit_margin < 0:
+            self.profit_margin = 0
+
+    def determine_target_price(self, move, last_shout):
+        """
+        """
+        if move == "increase":
+            r = random.uniform(*self.increasing_rel_target)
+            a = random.uniform(*self.increasing_abs_target)
+            return r * last_shout + a
+
+        r = random.uniform(*self.decreasing_rel_target)
+        a = random.uniform(*self.decreasing_abs_target)
+        return  r * last_shout + a
+
+    def widrow_holf_delta(self, target_price, offer):
+        return self.learning_rate * (target_price - offer)
+
+    def determine_momentum(self, target_price, offer):
+        if self.model.time == 0:
+            return self.momentum
+
+        x = self.momentum_coeff * self.momentum
+        y = (1 - self.momentum_coeff) * self.widrow_holf_delta(target_price, offer)
+        self.momentum = x + y
+
+        return self.momentum
+
+    def adjust_profit_margin(self, move, offer, last_shout):
+        target_price = self.determine_target_price(move, last_shout)
+        momentum = self.determine_momentum(target_price, offer)
+        valuation = self.prices[self.quantity]
+        self.profit_margin = (offer + momentum) / valuation - 1
+        self.margin_within_bounds()
+
+    def update_params(self):
+        """
+        Update the parameters of the agent after a time step in 
+        a double auction
+        """
+
+        offer = self.offer_price()
+        side_last_offer = self.model.agent_last_offer.market_side.lower()
+
+        if self.model.transaction_possible:
+
+            # raise profit margin 
+            if offer <= self.model.transaction_price:
+                self.adjust_profit_margin("increase", offer, self.model.transaction_price)
+
+            # lower profit margin
+            elif side_last_offer == "buyer" and offer >= self.model.transaction_price and self.in_market:
+                self.adjust_profit_margin("decrease", offer, self.model.transaction_price)
+
+        else:
+
+            # lower profit margin
+            if side_last_offer == "seller" and offer >= self.model.agent_last_offer.offer and self.in_market:
+                self.adjust_profit_margin("decrease", offer, self.model.agent_last_offer.offer)
+
+class Kaplan_sell(ZI_sell):
     """
     Implementation of an Kaplan agent (Rust, Palm & Miller, 1993)
     """
@@ -193,11 +319,6 @@ class Kaplan_sell(ZI_C_sell):
         self.profit_perc = params["profit_perc"]
         self.time_frac = params["time_frac"]
         self.most = None
-        self.can_shout = False
-        self.juicy_offer = False
-        self.small_spread = False
-        self.time_out = False
-        self.truthtelling = False
 
     def get_info(self):
         """
@@ -214,11 +335,11 @@ class Kaplan_sell(ZI_C_sell):
             f"\nTime fraction: {self.time_frac}" \
             f"\nSpread ratio: {self.spread_ratio}" \
             f"\nProfit percentage: {self.profit_perc}" \
-            f"\nCan shout: {self.can_shout}" \
-            f"\nJuicy offer: {self.juicy_offer}" \
-            f"\nSmall spread: {self.small_spread}" \
-            f"\nTime out: {self.time_out}" \
-            f"\nTruthtelling mode: {self.truthtelling}" \
+            f"\nCan shout: {self.willing_to_shout()}" \
+            f"\nJuicy offer: {self.is_juicy_offer()}" \
+            f"\nSmall spread: {self.is_small_spread()}" \
+            f"\nTime out: {self.is_time_out()}" \
+            f"\nTruthtelling mode: {self.is_truthteller()}" \
             f"\nMost: {self.most}" \
             f"\n================================================="
 
@@ -234,15 +355,12 @@ class Kaplan_sell(ZI_C_sell):
 
         if best_bid != 0:
             self.most = max(best_bid, next_token + 1)
-            # is_better_ask = self.most < self.model.best_ask
-            # if not is_better_ask and self.prices[self.quantity] + 1 < self.model.best_ask:
-            #     self.most = self.prices[self.quantity] + 1
         else:
             self.most = next_token + 1
 
         is_better_ask = self.most < self.model.best_ask
         is_endowed =  self.prices[self.quantity] <= self.most
-        # self.can_shout = is_better_ask and is_endowed
+
         return is_better_ask and is_endowed
 
     def is_juicy_offer(self):
@@ -250,7 +368,6 @@ class Kaplan_sell(ZI_C_sell):
         Determines if the best ask is less than the minimum trade price trade 
         price in the previous period.
         """
-        # self.juicy_offer = self.model.best_bid > self.model.prev_max_trade
         return self.model.best_bid > self.model.prev_max_trade
 
     def is_small_spread(self):
@@ -262,14 +379,13 @@ class Kaplan_sell(ZI_C_sell):
         small_spread = self.model.best_ask - self.model.best_bid < self.spread_ratio * self.model.best_bid
         valuation  = self.prices[self.quantity]
         expected_profit = self.model.best_bid - valuation > (1 + self.profit_perc) * valuation
-        # self.small_spread = reasonable_offer and small_spread and expected_profit
+
         return reasonable_offer and small_spread and expected_profit
 
     def is_time_out(self):
         """
         Determines if time is almost running out, otherwise False.
         """
-        # self.time_out = 1 - self.model.time / self.model.total_time < self.time_frac
         return 1 - self.model.time / self.model.total_time < self.time_frac
 
     def is_truthteller(self):
@@ -294,18 +410,12 @@ class Kaplan_sell(ZI_C_sell):
             time_out = self.is_time_out()
             truthteller = self.is_truthteller()
             self.active = can_shout and (juicy_offer or small_spread or time_out or truthteller)
-            self.can_shout = can_shout
-            self.juicy_offer = juicy_offer
-            self.small_spread = small_spread
-            self.time_out = time_out
-            self.truthtelling = truthteller
-            # self.active = self.can_shout and (self.juicy_offer or self.small_spread or self.time_out)
         else:
             self.active = True
 
     def offer_price(self):
         """
-        Generates a bid
+        Generates a ask
         """
         if self.model.best_ask != math.inf:
             self.offer = max(self.model.best_bid, self.most)
@@ -327,7 +437,3 @@ class Kaplan_sell(ZI_C_sell):
         """
         super().reset_agent()
         self.most = None
-        self.juicy_offer = False
-        self.small_spread = False
-        self.time_out = False
-        self.truthtelling = False

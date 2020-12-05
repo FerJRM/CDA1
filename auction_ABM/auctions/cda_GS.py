@@ -18,9 +18,9 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from tqdm import tqdm as pbar
 
-from schedulers.schedules import RandomGS
-from agents.buyers import ZI_buy, ZI_C_buy, Kaplan_buy
-from agents.sellers import ZI_sell, ZI_C_sell, Kaplan_sell
+from auction_ABM.schedulers.schedules import RandomGS
+from auction_ABM.agents.buyers import ZI_buy, ZI_C_buy, Kaplan_buy, ZIP_buy
+from auction_ABM.agents.sellers import ZI_sell, ZI_C_sell, Kaplan_sell, ZIP_sell
 
 
 def surplus_curr_period(model):
@@ -114,6 +114,7 @@ class CDA(Model):
         self.total_time = parameters["total_time"]
         self.time = 0
         self.params_strats = params_strategies
+        self.all_strategies = set(params_strategies.keys())
         self.buyers_strats = total_buyers_strategies
         self.sellers_strats = total_sellers_strategies
         self.save_output = save_output
@@ -137,6 +138,7 @@ class CDA(Model):
         self.best_ask, self.best_ask_id = math.inf, None
         self.max_trade, self.prev_max_trade = 0, math.inf
         self.min_trade, self.prev_min_trade = math.inf, -math.inf
+        self.agent_last_offer, self.transaction_possible = None, False
         self.surplus = defaultdict(float)
         self.quantity = defaultdict(float)
         self.efficiency = defaultdict(float)
@@ -237,23 +239,29 @@ class CDA(Model):
         """
         Create buyer depending on its strategy, limit prices
         """
+        standard_params = (self.next_id(), self, self.prices_buy, self.eq_buyer_surplus)
         if strategy.upper() == "ZI":
-            return ZI_buy(self.next_id(), self, self.prices_buy, self.eq_buyer_surplus)
+            return ZI_buy(*standard_params)
         elif strategy.upper() == "ZI_C":
-            return ZI_C_buy(self.next_id(), self, self.prices_buy, self.eq_buyer_surplus)
+            return ZI_C_buy(*standard_params)
         elif strategy.upper() == "KAPLAN":
-            return Kaplan_buy(self.next_id(), self, self.prices_buy, self.eq_buyer_surplus, params)
+            return Kaplan_buy(*standard_params, params)
+        elif strategy.upper() == "ZIP":
+            return ZIP_buy(*standard_params, params)
 
     def create_seller(self, strategy, params=None):
         """
         Create seller depending on its strategy and limit prices
         """
+        standard_params = (self.next_id(), self, self.prices_sell, self.eq_seller_surplus)
         if strategy.upper() == "ZI":
-            return ZI_sell(self.next_id(), self, self.prices_sell, self.eq_seller_surplus)
+            return ZI_sell(*standard_params)
         elif strategy.upper() == "ZI_C":
-            return ZI_C_sell(self.next_id(), self, self.prices_sell, self.eq_seller_surplus)
+            return ZI_C_sell(*standard_params)
         elif strategy.upper() == "KAPLAN":
-            return Kaplan_sell(self.next_id(), self, self.prices_sell, self.eq_seller_surplus, params)
+            return Kaplan_sell(*standard_params, params)
+        elif strategy.upper() == "ZIP":
+            return ZIP_sell(*standard_params, params)
 
     def set_spearman_rank(self):
         """
@@ -321,15 +329,19 @@ class CDA(Model):
             self.transaction_buy.append(agent.get_price())
             self.transaction_sell.append(seller.get_price())
             self.manage_order_transaction(agent, seller)
-        else:
-            self.transaction_price = self.best_bid
-            buyer = self.schedule.get_agent(self.best_bid_id)
-            self.transaction_buy.append(buyer.get_price())
-            self.transaction_sell.append(agent.get_price())
-            self.manage_order_transaction(buyer, agent)
+            return seller
 
-        # reset outstanding bids and asks
-        self.reset_bids(), self.reset_asks()
+        
+        self.transaction_price = self.best_bid
+        buyer = self.schedule.get_agent(self.best_bid_id)
+        self.transaction_buy.append(buyer.get_price())
+        self.transaction_sell.append(agent.get_price())
+        self.manage_order_transaction(buyer, agent)
+        
+        return buyer
+
+        # # reset outstanding bids and asks
+        # self.reset_bids(), self.reset_asks()
 
     def update_best_price(self, agent):
         """
@@ -402,6 +414,9 @@ class CDA(Model):
 
                 # update data if transaction is made during step
                 if self.schedule.step():
+                    # other_agent = self.make_trade(agent)
+                    self.reset_asks(), self.reset_bids()
+                    self.schedule.reset_offers_agents()
                     self.datacollector_transactions.collect(self)
                     self.no_transactions = 0
                 else:

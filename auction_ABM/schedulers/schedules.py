@@ -11,8 +11,8 @@ import random
 
 from mesa.time import BaseScheduler
 
-from agents.buyers import ZI_C_buy, Kaplan_buy
-from agents.sellers import ZI_C_sell, Kaplan_sell
+from auction_ABM.agents.buyers import ZI_C_buy, Kaplan_buy, ZIP_buy
+from auction_ABM.agents.sellers import ZI_C_sell, Kaplan_sell, ZIP_sell
 
 class RandomGS(BaseScheduler):
     """
@@ -42,18 +42,21 @@ class RandomGS(BaseScheduler):
 
     def get_active_agent(self):
         """
-        Randomize agents and subsequently chooses first agents that is in market 
-        and active.
+        Collect all active agents and randomly chooses one that will offer a price
         """
+
+        # collect active agents
         active_agents = []
         for agent in self.agent_buffer():
             agent.set_activity(), agent.set_in_market()
             if agent.is_active() and agent.is_in_market():
                 active_agents.append(agent)
         
+        # randomly choose active agent
         if active_agents:
             return self.model.random.choice(active_agents)
 
+        # none found
         return None
 
     def reset_offers_agents(self):
@@ -92,6 +95,13 @@ class RandomGS(BaseScheduler):
         self.time = 0
         self.steps = 0
 
+    def update_params_agents(self):
+        """
+        Update paramater of agents at the and of a time step
+        """
+        for agent in self.agent_buffer():
+            agent.update_params()
+
     def step(self):
         """
         Executes the steps of all agents, one at a time, in random order. 
@@ -102,8 +112,10 @@ class RandomGS(BaseScheduler):
         """
 
         # only perform step if actie agent is selected
-        agent, transaction_made = self.get_active_agent(), False
+        agent, self.model.transaction_possible = self.get_active_agent(), False
         if agent is not None:
+
+            self.model.agent_last_offer = agent
             
             # update log
             if self.model.log:
@@ -121,17 +133,30 @@ class RandomGS(BaseScheduler):
             # determines if trade needs to be made or outstanding bid/ask 
             # should be updated
             if self.model.is_trade_possible(agent):
-                self.model.make_trade(agent)
-                self.reset_offers_agents()
-                transaction_made = True
+                self.model.transaction_possible = True
+                self.model.update_best_price(agent)
+                _ = self.model.make_trade(agent)
             else:
                 self.model.update_best_price(agent)
+
+        if self.model.log:
+            self.model.log_auction.info("BEFORE UPDATING PARAMETERS")
+            for agent in self.agent_buffer():
+                self.model.log_auction.info(agent.get_info())
+
+        # update parameters agents
+        self.update_params_agents()
+
+        if self.model.log:
+            self.model.log_auction.info("AFTER UPDATING PARAMETERS")
+            for agent in self.agent_buffer():
+                self.model.log_auction.info(agent.get_info())
 
         # update time and steps of auction
         self.steps += 1
         self.time += 1
-        
-        return transaction_made
+
+        return self.model.transaction_possible
 
 class EvoRandomGS(RandomGS):
     """
@@ -151,6 +176,8 @@ class EvoRandomGS(RandomGS):
             new_agent = ZI_C_buy(*standard_params)
         elif new_strategy.upper() == "KAPLAN":
             new_agent = Kaplan_buy(*standard_params, self.model.params_strats[new_strategy.upper()])
+        elif new_strategy.upper() == "ZIP":
+            new_agent = ZIP_buy(*standard_params, self.model.params_strats[new_strategy.upper()])
 
         # keep track of surplus and quantity; reset agent for next period
         new_agent.surplus = surplus
@@ -171,6 +198,8 @@ class EvoRandomGS(RandomGS):
             new_agent = ZI_C_sell(*standard_params)
         elif new_strategy.upper() == "KAPLAN":
             new_agent = Kaplan_sell(*standard_params, self.model.params_strats[new_strategy.upper()])
+        elif new_strategy.upper() == "ZIP":
+            new_agent = ZIP_sell(*standard_params, self.model.params_strats[new_strategy.upper()])
 
         # keep track of surplus and quantity; reset agent for next period
         new_agent.surplus = surplus
@@ -186,28 +215,38 @@ class EvoRandomGS(RandomGS):
         market side
         """
 
-         # determines which strategy to choose (own or imitate)
+        # own profit is better, keep strategy
         if agent.surplus > other.surplus:
             strategy = agent.strategy
+
+        # profit other is better, switch strategy depending on relative difference
         elif agent.surplus < other.surplus:
-            prob = (other.surplus - agent.surplus) / other.surplus
+            prob = (other.surplus - agent.surplus) / other.surplus      
             if random.random() < prob:
-                switches += 1
                 strategy = other.strategy
+                if strategy != agent.strategy:
+                    switches += 1
             else:
                 strategy = agent.strategy
+
+        # surplus is equal so choice depends on the quantity of both agents
         elif agent.quantity > other.quantity:
             strategy = agent.strategy
         elif agent.quantity < other.quantity:
-            switches += 1
             strategy = other.strategy
+            if strategy != agent.strategy:
+                switches += 1
+
+        # quantity is also equal, so randomly choose new strategy
         elif random.random() < 0.5:
             strategy = agent.strategy
         else:
-            switches += 1
             strategy = other.strategy
+            if strategy != agent.strategy:
+                switches += 1
 
-        return strategy
+        # return new strategy and the updated total switches
+        return strategy, switches
 
     def replace_agents(self, new_strategies, surplus_agents, quantity_agents):
         """
@@ -252,14 +291,14 @@ class EvoRandomGS(RandomGS):
                 quantity_agents[agent.unique_id] = agent.quantity
                 continue
 
-            # randomly select other agent
+            # randomly select other agent from same market side
             while True:
                 other = self.model.random.choice(self.agents)
                 if agent.market_side.upper() == other.market_side.upper():
                     break
 
             # determines which strategy to choose by means of replication by imitation
-            new_strategies[agent.unique_id] = self.determine_new_strategy(agent, other, switches)
+            new_strategies[agent.unique_id], switches = self.determine_new_strategy(agent, other, switches)
 
             # keep track of surplus and quantity
             surplus_agents[agent.unique_id] = agent.surplus
@@ -276,3 +315,18 @@ class EvoRandomGS(RandomGS):
 
         self.time = 0
         self.steps = 0
+
+class EvoImitationMayority(EvoRandomGS):
+    """
+    Scheduler for an evolutionary CDA tournament. The evolutionary process is 
+    done by means of "mayority imitation".
+    """
+
+    def calc_market_average(self):
+        """
+        Determines the 
+        """
+        pass
+
+    def reset_agents(self):
+        pass
