@@ -19,6 +19,7 @@ class ZI_buy(Agent):
     def __init__(self, unique_id, model, prices, eq_surplus):
         super().__init__(unique_id, model)
         self.prices = prices
+        self.tot_commodities = len(prices)
         self.quantity = 0
         self.prev_quantity = 0
         self.budget = sum(prices)
@@ -118,7 +119,8 @@ class ZI_buy(Agent):
         """
         Shouts price.
         """
-        self.offer = random.randint(self.model.best_bid + 1, self.model.max_poss_price)
+        # self.offer = random.randint(self.model.best_bid + 1, self.model.max_poss_price)
+        self.offer = random.uniform(self.model.best_bid + 0.01, self.model.max_poss_price)
         return self.offer
 
     def transaction_update(self, price):
@@ -198,7 +200,8 @@ class ZI_C_buy(ZI_buy):
         """
         valuation = self.prices[self.quantity]
         max_bid = valuation if self.budget > valuation else self.budget
-        self.offer = random.randint(self.model.best_bid + 1, max_bid)
+        # self.offer = random.randint(self.model.best_bid + 1, max_bid)
+        self.offer = random.uniform(self.model.best_bid + 0.01, max_bid)
 
         return self.offer
 
@@ -211,7 +214,8 @@ class ZIP_buy(ZI_C_buy):
 
     def __init__(self, unique_id, model, prices, eq_surplus, params):
         super().__init__(unique_id, model, prices, eq_surplus)
-        self.profit_margin = random.uniform(*params["profit_margin_buyers"])
+        # self.profit_margin = random.uniform(*params["profit_margin_buyers"])
+        self.profit_margins = [random.uniform(*params["profit_margin_buyers"]) for _ in range(self.tot_commodities)]
         self.learning_rate = random.uniform(*params["learning_rate"])
         self.momentum_coeff = random.uniform(*params["momentum_coeff"])
         self.momentum = 0
@@ -232,7 +236,7 @@ class ZIP_buy(ZI_C_buy):
             f"\nOffer: {self.offer} " \
             f"\nQuantity: {self.quantity} " \
             f"\nBudget: {self.budget}" \
-            f"\nProfit margin: {self.profit_margin}" \
+            f"\nProfit margin: {self.profit_margins[self.quantity % self.tot_commodities]}" \
             f"\nLearning rate: {self.learning_rate}" \
             f"\nMomentum coeffiecient: {self.momentum_coeff}" \
             f"\nMomentum: {self.momentum}" \
@@ -242,7 +246,9 @@ class ZIP_buy(ZI_C_buy):
         """
         Generates an ask
         """
-        self.offer = int(round(self.prices[self.quantity] * (1 + self.profit_margin)))
+        # self.offer = self.prices[self.quantity] * (1 + self.profit_margin)
+        profit_margin = self.profit_margins[self.quantity % self.tot_commodities]
+        self.offer = self.prices[self.quantity] * (1 + profit_margin)
         if self.offer > self.budget:
             return self.budget
 
@@ -252,21 +258,25 @@ class ZIP_buy(ZI_C_buy):
         """
         Ensures that profit margin is within bounds
         """
-        if self.profit_margin < -1:
-            self.profit_margin = -1
-        elif self.profit_margin > 0:
-            self.profit_margin = 0
+        if self.profit_margins[self.quantity % self.tot_commodities] < -1:
+            self.profit_margins[self.quantity % self.tot_commodities] = -1
+        elif self.profit_margins[self.quantity % self.tot_commodities] > 0:
+            self.profit_margins[self.quantity % self.tot_commodities] = 0
+        # if self.profit_margin < -1:
+        #     self.profit_margin = -1
+        # elif self.profit_margin > 0:
+        #     self.profit_margin = 0
 
     def determine_target_price(self, move, last_shout):
         """
         """
         if move == "increase":
-            r = random.uniform(*self.increasing_rel_target)
-            a = random.uniform(*self.increasing_abs_target)
+            r = random.uniform(*self.decreasing_rel_target)
+            a = random.uniform(*self.decreasing_abs_target)
             return r * last_shout + a
 
-        r = random.uniform(*self.decreasing_rel_target)
-        a = random.uniform(*self.decreasing_abs_target)
+        r = random.uniform(*self.increasing_rel_target)
+        a = random.uniform(*self.increasing_abs_target)
         return  r * last_shout + a
 
     def widrow_holf_delta(self, target_price, offer):
@@ -280,13 +290,19 @@ class ZIP_buy(ZI_C_buy):
         y = (1 - self.momentum_coeff) * self.widrow_holf_delta(target_price, offer)
         self.momentum = x + y
 
+        if self.momentum < 0:
+            self.momentum = 0     
+        elif self.momentum > 1:
+            self.momentum = 1
+
         return self.momentum
 
     def adjust_profit_margin(self, move, offer, last_shout):
         target_price = self.determine_target_price(move, last_shout)
         momentum = self.determine_momentum(target_price, offer)
         valuation = self.prices[self.quantity]
-        self.profit_margin = (offer + momentum) / valuation - 1
+        self.profit_margins[self.quantity % self.tot_commodities] = (offer + momentum) / valuation - 1
+        # self.profit_margin = (offer + momentum) / valuation - 1
         self.margin_within_bounds()
     
     def update_params(self):
@@ -313,6 +329,13 @@ class ZIP_buy(ZI_C_buy):
             # lower profit margin
             if side_last_offer == "buyer" and offer <= self.model.agent_last_offer.offer and self.in_market:
                 self.adjust_profit_margin("decrease", offer, self.model.agent_last_offer.offer)
+
+    def reset_agent(self):
+        """
+        Resets attributes agents to initial values
+        """
+        super().reset_agent()
+        self.momentum = 0
 
 class Kaplan_buy(ZI_buy):
     """

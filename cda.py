@@ -17,9 +17,9 @@ if __name__ == "__main__":
 
     # retrieve command-line arguments, load demand and supply schedule 
     # and parameters model
-    name, market_id, cda_type, N, save_output, log = set_arguments()
-    prices_buy, prices_sell, eq = load_demand_supply(name, market_id)
-    params = load_parameters(name)
+    name, market_name, market_id, cda_type, N, save_output, log = set_arguments()
+    prices_buy, prices_sell, eq = load_demand_supply(market_name, market_id)
+    params = load_parameters(market_name, market_id, name)
     params_strats, total_buyers_strats, total_sellers_strats, params_model = params
     cda_params = (
         name, market_id, prices_buy, prices_sell, eq, params_model, params_strats, 

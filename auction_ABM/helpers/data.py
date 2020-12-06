@@ -9,11 +9,12 @@ Name developers
 
 import os
 
-def load_demand_supply(name, market_id):
+def load_demand_supply(market_name, market_id):
     """
     Loads demand and supply schedule from text file into lists
     """
-    ds_file = os.path.join("data", "demand_and_supply", name, "market_{}.txt".format(market_id))
+    ds_folder = "{}_market_{}".format(market_name, market_id)
+    ds_file = os.path.join(ds_folder, "market.txt".format(market_id))
     prices_buy, prices_sell = [], []
     with open(ds_file, 'r') as f:
         line = f.readline().rstrip("\n")
@@ -24,9 +25,7 @@ def load_demand_supply(name, market_id):
             prices_buy.append(int(buy)), prices_sell.append(int(sell))
             line = f.readline().rstrip("\n")
 
-    eq_file = os.path.join(
-        "data", "demand_and_supply", name, "equilibrium_market_{}.txt".format(market_id)
-    )
+    eq_file = os.path.join(ds_folder, "equilibrium_market.txt".format(market_id))
     eq = []
     with open(eq_file, 'r') as f:
         for line in f:
@@ -39,13 +38,14 @@ def load_demand_supply(name, market_id):
 
     return prices_buy, prices_sell, eq
 
-def load_parameters(name):
+def load_parameters(market_name, market_id, name):
     """
     Load model parameters for a simulation in a double auction with a 
     certain distribution of agents, their corresponding parameters and thus
     also auction parameters.
     """
-    folder = os.path.join("data", "parameters", name)
+    # folder = os.path.join("data", "parameters", name)
+    folder = os.path.join("{}_market_{}".format(market_name, market_id), name)
     distr_file = os.path.join(folder, "distribution_agents.txt")
     agents_file = os.path.join(folder, "parameters_agents.txt")
     auction_file = os.path.join(folder, "parameters_CDA.txt")

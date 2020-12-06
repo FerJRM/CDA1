@@ -8,19 +8,14 @@ Name developers
 """
 
 import os
-import sys
-sys.path.insert(0, "auction_ABM")
 
-from helpers.cmd_ds import set_arguments
-from helpers.data import load_parameters
-import helpers.demand_and_supply as ds
-
-DS_PLOT = os.path.join("results", "demand_and_supply")
-DS_DATA = os.path.join("data", "demand_and_supply")
+from auction_ABM.helpers.cmd_ds import set_arguments
+from auction_ABM.helpers.data import load_parameters
+import auction_ABM.helpers.demand_and_supply as ds
 
 if __name__ == "__main__":
-    name, market_id = set_arguments()
-    params = load_parameters(name)
+    name, market_type, market_id = set_arguments()
+    params = load_parameters(market_type, market_id, name)
     params_strats, total_buyers_strats, total_sellers_strats, params_model = params
 
     total_buyers, total_sellers = 0, 0
@@ -35,13 +30,11 @@ if __name__ == "__main__":
     )
     prices_buy, prices_sell, all_prices_buy, all_prices_sell, equilibrium = ds_results
 
-    folder = os.path.join(DS_DATA, name)
-    ds.save_prices(prices_buy, prices_sell, equilibrium, folder, market_id)
+    ds.save_prices(prices_buy, prices_sell, equilibrium, market_type, market_id)
 
-    folder = os.path.join(DS_PLOT, name)
     ds.plot_demand_supply(
         prices_buy, prices_sell, all_prices_buy, all_prices_sell, 
         total_buyers, total_sellers, params_model["commodities"], 
         params_model["min_price"], params_model["max_price"], 
-        folder, market_id, True, True
+        market_type, market_id, True, True
     )

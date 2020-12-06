@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from auction_ABM.auctions.cda_GS import CDA
-from auction_ABM.auctions.evo_cda_GS import EvoCDA
+import auction_ABM.auctions.cda_GS as GS
+import auction_ABM.auctions.cda_TD as TD
 
 DPI = 300
 
@@ -46,10 +46,12 @@ class CDARunner:
         Custom function to intialize a single auction object for a given set of 
         parameters and to run a single simulation.
         """
-        if self.cda_type == "cda":
-            auction = CDA(*parameters)
-        elif self.cda_type == "evo cda":
-            auction = EvoCDA(*parameters)
+        if self.cda_type.lower() == "gs":
+            auction = GS.CDA(*parameters)
+        elif self.cda_type.lower() == "gs evo":
+            auction = GS.EvoCDA(*parameters)
+        elif self.cda_type.lower() == "TD":
+            auction = TD.CDA(*parameters)
             
         return auction.step()
 

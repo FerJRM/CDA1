@@ -25,21 +25,6 @@ class RandomGS(BaseScheduler):
         """
         return self._agents[unique_id]
 
-    def get_offers_agents(self):
-        """
-        Let all the active shout a bid or ask and returns the made bids and asks
-        """
-        bids, asks = {}, {}
-        for agent in self.agent_buffer():
-            agent.set_activity(), agent.set_in_market()
-            if agents.is_active() and agent.is_in_market():
-                if agent.market_side.lower() == "buyer":
-                    bids[agent.unique_id] = agent.step()
-                else:
-                    asks[agent.unique_id] = agent.step()
-
-        return bids, asks
-
     def get_active_agent(self):
         """
         Collect all active agents and randomly chooses one that will offer a price
@@ -237,13 +222,9 @@ class EvoRandomGS(RandomGS):
             if strategy != agent.strategy:
                 switches += 1
 
-        # quantity is also equal, so randomly choose new strategy
-        elif random.random() < 0.5:
-            strategy = agent.strategy
+        # quantity is also equal so rather test same strategy again
         else:
-            strategy = other.strategy
-            if strategy != agent.strategy:
-                switches += 1
+            strategy = agent.strategy
 
         # return new strategy and the updated total switches
         return strategy, switches
@@ -278,7 +259,7 @@ class EvoRandomGS(RandomGS):
         switches = 0
 
         # start finding the new strategies of all agents, also keep track of 
-        # their surplus and quantity
+        # their surplus and quantity, ALSO KEEP TRACK OF THEIR PARAMETERS
         new_strategies = {}
         surplus_agents = {}
         quantity_agents = {}

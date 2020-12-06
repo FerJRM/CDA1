@@ -66,7 +66,7 @@ def is_valid_prices(prices_buy, prices_sell, commodities):
     for commodity in range(commodities):
 
         # if price to buy become lower that price to sell it means then it means
-        # afterwards nog trades are possible so we make this our equilibrium point
+        # afterwards no trades are possible so we make this our equilibrium point
         if prices_buy[commodity] <= prices_sell[commodity] and commodity != commodities - 1:
 
             # makes sure a valid equilibrium price  is inserted, so that the
@@ -172,21 +172,21 @@ def determine_equilibrium(prices_buy, prices_sell, all_prices_buy, all_prices_se
     # return empty equilibrium value, if something might have gone wrong
     return ()
 
-def save_prices(prices_buy, prices_sell, equilibrium, folder, market_id):
+def save_prices(prices_buy, prices_sell, equilibrium, market_name, market_id):
     """
     Saves the limit prices tot text file, so it can be re-used
     """
 
     # save individual demand and supply schedules (limit prices) to text file
-    os.makedirs(folder, exist_ok=True)
-    filename = os.path.join(folder, "market_" + str(market_id) + ".txt")
+    folder = os.path.join("{}_market_{}".format(market_name, market_id))
+    filename = os.path.join(folder, "market.txt")
     with open(filename, 'w') as f:
         f.write("BUY\tSELL\n")
         for buy, sell in zip(prices_buy, prices_sell):
             f.write("{}\t{}\n".format(buy, sell))
 
     # save equilbrium values to text file
-    filename = os.path.join(folder, "equilibrium_market_" + str(market_id) + ".txt")
+    filename = os.path.join(folder, "equilibrium_market.txt")
     with open(filename, 'w') as f:
         price, quantity, surplus, buy_surplus, sell_surplus = equilibrium
         f.write("Price\t{}\n".format(price))
@@ -199,15 +199,16 @@ def save_prices(prices_buy, prices_sell, equilibrium, folder, market_id):
 def plot_demand_supply(
         prices_buy, prices_sell, all_prices_buy, all_prices_sell, 
         total_buyers, total_sellers, commodities, min_poss_price, max_poss_price, 
-        folder, market_id, show_plot=True, save_plot=False
+        market_name, market_id, show_plot=True, save_plot=False
     ):
     """
     Plots demand and supply scedule for a given set of prices
     """
 
     # make sure folder exists, prepare name, and quantities for plot
+    folder = os.path.join("{}_market_{}".format(market_name, market_id))
     os.makedirs(folder, exist_ok=True)
-    filename = os.path.join(folder, "market_" + str(market_id) + ".pdf")
+    filename = os.path.join(folder, "market.pdf")
     q_demand = [demand(p, all_prices_buy) for p in prices_buy]
     q_supply = [supply(p, all_prices_sell) for p in prices_sell]
 
