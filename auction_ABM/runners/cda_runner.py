@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import auction_ABM.auctions.cda_GS as GS
-import auction_ABM.auctions.cda_TD as TD
+from auction_ABM.auctions.cda_GS import CDAGS, EvoCDA
+from auction_ABM.auctions.cda_TD import CDATD
 
 DPI = 300
 
@@ -47,11 +47,11 @@ class CDARunner:
         parameters and to run a single simulation.
         """
         if self.cda_type.lower() == "gs":
-            auction = GS.CDA(*parameters)
+            auction = CDAGS(*parameters)
         elif self.cda_type.lower() == "gs evo":
-            auction = GS.EvoCDA(*parameters)
-        elif self.cda_type.lower() == "TD":
-            auction = TD.CDA(*parameters)
+            auction = EvoCDA(*parameters)
+        elif self.cda_type.lower() == "td":
+            auction = CDATD(*parameters)
             
         return auction.step()
 
@@ -72,7 +72,7 @@ class CDARunner:
             df_agents = dataframes[2]
             df_periods_agents = dataframes[3]
 
-            if self.cda_type == "evo cda":
+            if "evo" in self.cda_type.lower():
                 df_evo = dataframes[4]
                 print(df_evo)
 
@@ -100,7 +100,7 @@ class CDARunner:
         df_agents = pd.concat(data_agents)
         df_periods_agents = pd.concat(data_periods_agents)
 
-        if self.cda_type == "evo cda":
+        if "evo" in self.cda_type.lower():
             data_evo = [result[4] for result in pool_results]
             df_evo = pd.concat(data_evo)
             name = self.filename + "evo_process.csv"
@@ -122,7 +122,7 @@ class CDARunner:
         name = self.filename + "_periods_agents.csv"
         df_periods_agents.to_csv(name)
 
-        if self.cda_type == "evo cda":
+        if "evo" in self.cda_type.lower():
             return df_transactions, df_periods, df_agents, df_periods_agents, df_evo
 
         return df_transactions, df_periods, df_agents, df_periods_agents

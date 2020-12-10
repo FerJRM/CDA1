@@ -18,11 +18,12 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from tqdm import tqdm as pbar
 
-from auction_ABM.schedulers.schedules_TD import RandomGS
-from auction_ABM.agents.buyers import ZI_buy, ZI_C_buy, Kaplan_buy, ZIP_buy
-from auction_ABM.agents.sellers import ZI_sell, ZI_C_sell, Kaplan_sell, ZIP_sell
+import auction_ABM.auctions.cda_GS as GS
+from auction_ABM.schedulers.schedules_TD import RandomTD
+from auction_ABM.agents.buyers_TD import ZI_buy, ZI_C_buy, Kaplan_buy, ZIP_buy
+from auction_ABM.agents.sellers_TD import ZI_sell, ZI_C_sell, Kaplan_sell, ZIP_sell
 
-class CDA(Model):
+class CDATD(Model):
     """
     Continuous Double Auction model as represented in Tesauro & Das (2001).
     It manages the flow in of agents steps and collects the necessary data,
@@ -107,7 +108,48 @@ class CDA(Model):
         self.no_transactions = 0
 
         # set up scheduler for auction and initialize population
-        # self.init_population()
+        self.init_population()
+
+         # intialize datacollector to keep track of transaction data
+        self.datacollector_transactions = DataCollector(
+            model_reporters={
+                "ID": "unique_id",
+                "Period": "period",
+                "Surplus": GS.surplus_curr_period, 
+                "Quantity": GS.quantity_curr_period,
+                "Price": "transaction_price",
+                "Squared error": GS.rmsd_transaction_price,
+                "Time": "time"
+            }, 
+            agent_reporters={
+                "ID": "model.unique_id",
+                "Period": "model.period",
+                "Quantity": "quantity",
+                "Surplus": "surplus", 
+                "Budget": "budget"
+            }
+        )
+
+        # datacollector for end-of-period statistics
+        self.datacollector_periods = DataCollector(
+            model_reporters={
+                "ID": "unique_id",
+                "Period": "period",
+                "Efficiency": GS.allocative_efficiency,
+                "Trade ratio": GS.trade_ratio,
+                "Quantity": GS.quantity_curr_period,
+                "Spearman Correlation": GS.get_spearman_corr,
+                "Spearman P-value": GS.get_spearman_pvalue
+            },
+            agent_reporters={
+                "ID": "model.unique_id",
+                "Period": "model.period",
+                "Quantity": "quantity",
+                "Surplus": "surplus",
+                "Profit dispersion": "profit_dispersion",
+                "Budget": "budget"
+            }
+        )
 
     def get_info(self):
         """
@@ -140,7 +182,7 @@ class CDA(Model):
         """
         Initialize population of traders
         """
-        self.schedule = RandomGS(self)
+        self.schedule = RandomTD(self)
         self.running = True
         
         for strategy, buyers in self.buyers_strats.items():
@@ -152,6 +194,7 @@ class CDA(Model):
             for _ in range(sellers):
                 agent = self.create_seller(strategy, self.params_strats[strategy])
                 self.schedule.add(agent)
+                
     def create_buyer(self, strategy, params=None):
         """
         Create buyer depending on its strategy, limit prices
@@ -190,17 +233,22 @@ class CDA(Model):
         self.spearman_correlation[self.period] = corr
         self.spearman_pvalue[self.period] = p
 
-    def is_trade_possible(self):
+    def is_trade_possible(self, agent):
         """
         Determines if trade is possible (best bid and ask crosses)
         """
-        return self.best_bid >= self.best_ask
+        if agent.market_side == "buyer":
+            return agent.offer >= self.best_ask
+
+        return agent.offer <= self.best_bid
 
     def update_best_price(self, agent):
         """
         Updates best bid or ask depending on the market side of agent and its
         newly offered price
         """
+
+        self.agent_last_offer = agent
 
         # update log
         if self.log:
@@ -210,13 +258,69 @@ class CDA(Model):
         # update outstanding price
         if agent.market_side == "buyer" and agent.offer > self.best_bid:
             self.best_bid, self.best_bid_id = agent.offer, agent.unique_id
+            self.outstanding_bids[agent.unique_id] = agent.offer
         elif agent.market_side == "seller" and agent.offer < self.best_ask:
             self.best_ask, self.best_ask_id = agent.offer, agent.unique_id
+            self.outstanding_asks[agent.unique_id] = agent.offer
 
         # update log
         if self.log:
             self.log_auction.info("AFTER UPDATE OUTSTANDING BIDS")
             self.log_auction.info(self.get_info())
+
+    def sets_best_bid(self):
+        """
+        Sets new best bid and the corresponding agent id
+        """
+        if self.outstanding_bids:
+            self.best_bid_id = max(
+                self.outstanding_bids, key=lambda x: self.outstanding_bids[x]
+            )
+            self.best_bid = self.outstanding_bids[self.best_bid_id]
+
+        self.best_bid, self.best_bid_id = 0, None
+
+    def sets_best_ask(self):
+        """
+        Sets new best ask and the corresponding agent id
+        """
+        if self.outstanding_asks:
+            self.best_ask_id = min(
+                self.outstanding_asks, key=lambda x: self.outstanding_asks[x]
+            )
+            self.best_ask = self.outstanding_asks[self.best_ask_id]
+
+        self.best_ask, self.best_ask_id = math.inf, None
+
+    def remove_outstanding_offers(self, buyer, seller):
+        """
+        Removes any outstanding offers from queue after the transaction
+        """
+        self.outstanding_bids.pop(buyer.unique_id, None)
+        self.outstanding_asks.pop(seller.unique_id, None)
+
+    def manage_order_transaction(self, buyer, seller):
+        """
+        Updates the agents' and model paramaters for a transaction
+        """
+        buyer_surplus = buyer.transaction_update(self.transaction_price)
+        seller_surplus = seller.transaction_update(self.transaction_price)
+        self.surplus[self.period] += buyer_surplus + seller_surplus
+        self.quantity[self.period] += 1
+        buyer.reset_no_transactions(), seller.reset_no_transactions()
+        self.remove_outstanding_offers(buyer, seller)
+        self.sets_best_bid(), self.sets_best_ask()
+
+        # update min trading price
+        if self.transaction_price < self.min_trade:
+            self.min_trade = self.transaction_price
+
+        # update max trading prices
+        if self.transaction_price > self.max_trade:
+            self.max_trade = self.transaction_price
+
+        if self.log:
+            self.log_auction.info(self.get_info_transaction(buyer, seller, buyer_surplus, seller_surplus))
 
     def make_trade(self, agent):
         """
@@ -232,7 +336,7 @@ class CDA(Model):
             self.transaction_buy.append(agent.get_price())
             self.transaction_sell.append(seller.get_price())
             self.manage_order_transaction(agent, seller)
-            return seller
+            return agent.unique_id, seller.unique_id
 
         
         self.transaction_price = self.best_bid
@@ -241,7 +345,46 @@ class CDA(Model):
         self.transaction_sell.append(agent.get_price())
         self.manage_order_transaction(buyer, agent)
         
-        return buyer
+        return buyer.unique_id, agent.unique_id
+
+    def is_end_auction(self):
+        """
+        Returns True if auction ended, False otherwise.
+        """
+
+        # lowest limit price of sellers still in market
+        min_sell = min(
+            [
+                agent.get_price() for agent in self.schedule.agent_buffer() 
+                if agent.market_side == "seller"
+            ]
+        )
+
+        # tries to find buyer able to make trade with seller with lowers limit price
+        for agent in self.schedule.agent_buffer():
+            if agent.market_side == "buyer":
+                price, budget = agent.get_price(), agent.get_budget()
+                if price >= min_sell and budget >= min_sell:
+                    return False
+
+        # if not found auction has ended
+        return True
+
+    def reset_period(self):
+        """
+        Resets auction for new period to take place
+        """
+        self.transaction_price = None
+        self.outstanding_bids, self.outstanding_asks = {}, {}
+        self.best_bid, self.best_bid_id = 0, None
+        self.best_ask, self.best_ask_id = math.inf, None
+        self.prev_min_trade, self.prev_max_trade = self.min_trade, self.max_trade
+        self.min_trade, self.max_trade = math.inf, 0
+        self.transaction_buy, self.transaction_sell = [], []
+        self.agent_last_offer, self.transaction_possible = None, False
+        self.no_transactions = 0
+        
+        self.schedule.reset_agents()
 
     def step(self):
         """
@@ -258,33 +401,28 @@ class CDA(Model):
                     self.log_auction.info("BEORE STEP IN AUCTION")
                     self.log_auction.info(self.get_info())
 
-                # # update data if transaction is made during step
-                # if self.schedule.step():
-                #     # other_agent = self.make_trade(agent)
-                #     self.reset_asks(), self.reset_bids()
-                #     self.schedule.reset_offers_agents()
-                #     self.datacollector_transactions.collect(self)
-                #     self.no_transactions = 0
-                # else:
-                #     self.no_transactions += 1
-                #     self.schedule.update_no_transactions()
+                # update data if transaction is made during step
+                if self.schedule.step():
+                    self.no_transactions = 0
+                else:
+                    self.no_transactions += 1
                 
                 # update log
                 if self.log:
                     self.log_auction.info("AFTER STEP IN AUCTION")
                     self.log_auction.info(self.get_info())
 
-                # # determines if all possible trades are already done, if so terminate period
-                # if self.is_end_auction():
-                #     break
+                # determines if all possible trades are already done, if so terminate period
+                if self.is_end_auction():
+                    break
 
             # reset auction for next period
-            # self.schedule.set_profit_dispersion()
-            # self.set_spearman_rank()
-            # self.efficiency[self.period] = allocative_efficiency(self)
-            # self.datacollector_transactions.collect(self)
-            # self.datacollector_periods.collect(self)
-            # self.reset_period()
+            self.schedule.set_profit_dispersion()
+            self.set_spearman_rank()
+            self.efficiency[self.period] = GS.allocative_efficiency(self)
+            self.datacollector_transactions.collect(self)
+            self.datacollector_periods.collect(self)
+            self.reset_period()
 
             # update log with final results period
             if self.log:
@@ -299,4 +437,10 @@ class CDA(Model):
 
         self.running = False
 
-        # return data_transactions, data_periods, data_agents, data_periods_agents
+        # update datacollectors with end of period information
+        data_transactions = self.datacollector_transactions.get_model_vars_dataframe()
+        data_periods = self.datacollector_periods.get_model_vars_dataframe()
+        data_agents = self.datacollector_transactions.get_agent_vars_dataframe()
+        data_periods_agents = self.datacollector_periods.get_agent_vars_dataframe()
+
+        return data_transactions, data_periods, data_agents, data_periods_agents

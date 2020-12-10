@@ -22,16 +22,16 @@ def set_arguments():
         "market_id", type=int, help="id of market of the given simulation to to run"
     )
     parser.add_argument(
-        "cda_type", type=str, choices=["GS", "GS evo"], help="type of cda market to run"
+        "cda_type", type=str, choices=["GS", "GS evo", "TD"], help="type of cda market to run"
     )
     parser.add_argument(
         "N", type=int, help="amount of simulations"
     )
     parser.add_argument(
-        "--save_output", type=str2bool, default=True, help="save data transaction or not (default=True)"
+        "--save_output", type=str2bool, default=False, help="save data transaction or not (default=True)"
     )
     parser.add_argument(
-        "--log", type=str2bool, default=True, help="run with logfile or not (default=True)"
+        "--log", type=str2bool, default=False, help="run with logfile or not (default=True)"
     )
     
     args = parser.parse_args()

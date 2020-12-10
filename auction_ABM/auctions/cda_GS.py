@@ -19,8 +19,8 @@ from mesa.datacollection import DataCollector
 from tqdm import tqdm as pbar
 
 from auction_ABM.schedulers.schedules import RandomGS, EvoRandomGS
-from auction_ABM.agents.buyers import ZI_buy, ZI_C_buy, Kaplan_buy, ZIP_buy
-from auction_ABM.agents.sellers import ZI_sell, ZI_C_sell, Kaplan_sell, ZIP_sell
+from auction_ABM.agents.buyers_GS import ZI_buy, ZI_C_buy, Kaplan_buy, ZIP_buy
+from auction_ABM.agents.sellers_GS import ZI_sell, ZI_C_sell, Kaplan_sell, ZIP_sell
 
 
 def surplus_curr_period(model):
@@ -69,7 +69,7 @@ def get_spearman_pvalue(model):
     """
     return model.spearman_pvalue[model.period]
 
-class CDA(Model):
+class CDAGS(Model):
     """
     Continuous Double Auction model as represented in Gode en Sunder (1993).
     It manages the flow in of agents steps and collects the necessary data,
@@ -142,14 +142,14 @@ class CDA(Model):
         self.max_trade, self.prev_max_trade = 0, math.inf
         self.min_trade, self.prev_min_trade = math.inf, -math.inf
         self.agent_last_offer, self.transaction_possible = None, False
+        self.transaction_buy = []
+        self.transaction_sell = []
+        self.no_transactions = 0
         self.surplus = defaultdict(float)
         self.quantity = defaultdict(float)
         self.efficiency = defaultdict(float)
         self.spearman_correlation = defaultdict(float)
         self.spearman_pvalue = defaultdict(float)
-        self.transaction_buy = []
-        self.transaction_sell = []
-        self.no_transactions = 0
 
         # set up scheduler for auction and initialize population
         self.init_population()
@@ -229,20 +229,20 @@ class CDA(Model):
         self.running = True
         
         for strategy, buyers in self.buyers_strats.items():
-            for _ in range(buyers):
-                agent = self.create_buyer(strategy, self.params_strats[strategy])
+            for i in range(buyers):
+                agent = self.create_buyer(strategy, self.prices_buy[i], self.params_strats[strategy])
                 self.schedule.add(agent)
 
         for strategy, sellers in self.sellers_strats.items():
-            for _ in range(sellers):
-                agent = self.create_seller(strategy, self.params_strats[strategy])
+            for i in range(sellers):
+                agent = self.create_seller(strategy, self.prices_sell[i], self.params_strats[strategy])
                 self.schedule.add(agent)
 
-    def create_buyer(self, strategy, params=None):
+    def create_buyer(self, strategy, valuation, params=None):
         """
         Create buyer depending on its strategy, limit prices
         """
-        standard_params = (self.next_id(), self, self.prices_buy, self.eq_buyer_surplus)
+        standard_params = (self.next_id(), self, valuation, self.eq_buyer_surplus, len(self.prices_buy))
         if strategy.upper() == "ZI":
             return ZI_buy(*standard_params)
         elif strategy.upper() == "ZI_C":
@@ -252,11 +252,11 @@ class CDA(Model):
         elif strategy.upper() == "ZIP":
             return ZIP_buy(*standard_params, params)
 
-    def create_seller(self, strategy, params=None):
+    def create_seller(self, strategy, valuation, params=None):
         """
         Create seller depending on its strategy and limit prices
         """
-        standard_params = (self.next_id(), self, self.prices_sell, self.eq_seller_surplus)
+        standard_params = (self.next_id(), self, valuation, self.eq_seller_surplus, len(self.prices_sell))
         if strategy.upper() == "ZI":
             return ZI_sell(*standard_params)
         elif strategy.upper() == "ZI_C":
@@ -393,6 +393,7 @@ class CDA(Model):
         self.prev_min_trade, self.prev_max_trade = self.min_trade, self.max_trade
         self.min_trade, self.max_trade = math.inf, 0
         self.transaction_buy, self.transaction_sell = [], []
+        self.agent_last_offer, self.transaction_possible = None, False
         self.no_transactions = 0
         
         self.schedule.reset_agents()
@@ -461,7 +462,7 @@ class CDA(Model):
 
         return data_transactions, data_periods, data_agents, data_periods_agents
 
-class EvoCDA(CDA):
+class EvoCDA(CDAGS):
     def __init__(
             self, unique_id, name, market_id, prices_buy, prices_sell, equilibrium, parameters, 
             params_strategies={"ZI_C": {}}, total_buyers_strategies={"ZI_C": 10}, 
@@ -508,13 +509,13 @@ class EvoCDA(CDA):
         self.running = True
         
         for strategy, buyers in self.buyers_strats.items():
-            for _ in range(buyers):
-                agent = self.create_buyer(strategy, self.params_strats[strategy])
+            for i in range(buyers):
+                agent = self.create_buyer(strategy, self.prices_buy[i], self.params_strats[strategy])
                 self.schedule.add(agent)
 
         for strategy, sellers in self.sellers_strats.items():
-            for _ in range(sellers):
-                agent = self.create_seller(strategy, self.params_strats[strategy])
+            for i in range(sellers):
+                agent = self.create_seller(strategy, self.prices_sell[i], self.params_strats[strategy])
                 self.schedule.add(agent)
 
     def update_number_strategies(self):
@@ -594,7 +595,6 @@ class EvoCDA(CDA):
 
             # end run if population has converged
             if self.pop_has_converged():
-                print("POPULATION HAS CONVERGED")
                 break
 
         self.running = False

@@ -11,8 +11,8 @@ import random
 
 from mesa.time import BaseScheduler
 
-from auction_ABM.agents.buyers import ZI_C_buy, Kaplan_buy, ZIP_buy
-from auction_ABM.agents.sellers import ZI_C_sell, Kaplan_sell, ZIP_sell
+from auction_ABM.agents.buyers_GS import ZI_C_buy, Kaplan_buy, ZIP_buy
+from auction_ABM.agents.sellers_GS import ZI_C_sell, Kaplan_sell, ZIP_sell
 
 class RandomGS(BaseScheduler):
     """
@@ -149,36 +149,42 @@ class EvoRandomGS(RandomGS):
     done by means of "replication by imitation".
     """
 
-    def replace_buyer(self, agent, new_strategy, surplus, quantity):
+    def replace_buyer(self, agent, new_strategy, params_agent):
         """
         Replace a buyer by its new strategy, keep track of its surplus and 
         quantity and reset its parameters. Returns the newly made agent
         """
 
+        quantity, surplus = agent.quantity, agent.surplus
+
         # make new agent
-        standard_params = [agent.unique_id, self.model, self.model.prices_buy, self.model.eq_buyer_surplus]
+        standard_params = [agent.unique_id, self.model, agent.valuation, self.model.eq_buyer_surplus, agent.tot_commodities]
         if new_strategy.upper() == "ZI_C":
             new_agent = ZI_C_buy(*standard_params)
+
         elif new_strategy.upper() == "KAPLAN":
             new_agent = Kaplan_buy(*standard_params, self.model.params_strats[new_strategy.upper()])
+
         elif new_strategy.upper() == "ZIP":
             new_agent = ZIP_buy(*standard_params, self.model.params_strats[new_strategy.upper()])
 
         # keep track of surplus and quantity; reset agent for next period
-        new_agent.surplus = surplus
-        new_agent.quantity = quantity
+        new_agent.set_import_params(params_agent)
+        new_agent.quantity, new_agent.surplus = quantity, surplus
         new_agent.reset_agent()
 
         return new_agent
 
-    def replace_seller(self, agent, new_strategy, surplus, quantity):
+    def replace_seller(self, agent, new_strategy, params_agent):
         """
         Replace a seller by its new strategy, keep track of its surplus and 
         quantity and reset its parameters. Returns the newly made agent
         """
 
+        quantity, surplus = agent.quantity, agent.surplus
+
         # make new agent
-        standard_params = [agent.unique_id, self.model, self.model.prices_sell, self.model.eq_seller_surplus]
+        standard_params = [agent.unique_id, self.model, agent.valuation, self.model.eq_seller_surplus, agent.tot_commodities]
         if new_strategy.upper() == "ZI_C":
             new_agent = ZI_C_sell(*standard_params)
         elif new_strategy.upper() == "KAPLAN":
@@ -187,8 +193,8 @@ class EvoRandomGS(RandomGS):
             new_agent = ZIP_sell(*standard_params, self.model.params_strats[new_strategy.upper()])
 
         # keep track of surplus and quantity; reset agent for next period
-        new_agent.surplus = surplus
-        new_agent.quantity = quantity
+        new_agent.set_import_params(params_agent)
+        new_agent.quantity, new_agent.surplus = quantity, surplus
         new_agent.reset_agent()
 
         return new_agent
@@ -202,34 +208,41 @@ class EvoRandomGS(RandomGS):
 
         # own profit is better, keep strategy
         if agent.surplus > other.surplus:
-            strategy = agent.strategy
+            return agent.strategy, switches, agent.return_import_params()
 
         # profit other is better, switch strategy depending on relative difference
         elif agent.surplus < other.surplus:
+
             prob = (other.surplus - agent.surplus) / other.surplus      
             if random.random() < prob:
-                strategy = other.strategy
-                if strategy != agent.strategy:
+
+                if other.strategy != agent.strategy:
                     switches += 1
+                    return other.strategy, switches, other.return_import_params()
+                else:
+                    return agent.strategy, switches, agent.return_import_params()
+
             else:
-                strategy = agent.strategy
+                return agent.strategy, switches, agent.return_import_params()
 
         # surplus is equal so choice depends on the quantity of both agents
         elif agent.quantity > other.quantity:
-            strategy = agent.strategy
+            return agent.strategy, switches, agent.return_import_params()
+
         elif agent.quantity < other.quantity:
-            strategy = other.strategy
-            if strategy != agent.strategy:
+
+            if other.strategy != agent.strategy:
                 switches += 1
+                return other.strategy, switches, other.return_import_params()
+            else:
+                return agent.strategy, switches, agent.return_import_params()
 
         # quantity is also equal so rather test same strategy again
         else:
-            strategy = agent.strategy
+            return agent.strategy, switches, agent.return_import_params()
 
-        # return new strategy and the updated total switches
-        return strategy, switches
-
-    def replace_agents(self, new_strategies, surplus_agents, quantity_agents):
+    # def replace_agents(self, new_strategies, surplus_agents, quantity_agents):
+    def replace_agents(self, new_strategies, params_agents):
         """
         Replace all agents by their new strategies
         """
@@ -237,13 +250,11 @@ class EvoRandomGS(RandomGS):
         for agent in self.agent_buffer():
             if agent.market_side.lower() == "buyer":
                 new_agent = self.replace_buyer(
-                    agent, new_strategies[agent.unique_id], 
-                    surplus_agents[agent.unique_id], quantity_agents[agent.unique_id]
+                    agent, new_strategies[agent.unique_id], params_agents[agent.unique_id]
                 )
             else:
                 new_agent = self.replace_seller(
-                    agent, new_strategies[agent.unique_id],
-                    surplus_agents[agent.unique_id], quantity_agents[agent.unique_id]
+                    agent, new_strategies[agent.unique_id], params_agents[agent.unique_id]
                 )
             
             self._agents[agent.unique_id] = new_agent
@@ -261,15 +272,15 @@ class EvoRandomGS(RandomGS):
         # start finding the new strategies of all agents, also keep track of 
         # their surplus and quantity, ALSO KEEP TRACK OF THEIR PARAMETERS
         new_strategies = {}
-        surplus_agents = {}
-        quantity_agents = {}
+        params_agents = {}
         for agent in self.agent_buffer():
 
             # if current profit is better than last period then keep strategy
             if agent.surplus >= agent.prev_surplus:
                 new_strategies[agent.unique_id] = agent.strategy
-                surplus_agents[agent.unique_id] = agent.surplus
-                quantity_agents[agent.unique_id] = agent.quantity
+                params_agents[agent.unique_id] = agent.return_import_params()
+                # surplus_agents[agent.unique_id] = agent.surplus
+                # quantity_agents[agent.unique_id] = agent.quantity
                 continue
 
             # randomly select other agent from same market side
@@ -279,14 +290,13 @@ class EvoRandomGS(RandomGS):
                     break
 
             # determines which strategy to choose by means of replication by imitation
-            new_strategies[agent.unique_id], switches = self.determine_new_strategy(agent, other, switches)
-
-            # keep track of surplus and quantity
-            surplus_agents[agent.unique_id] = agent.surplus
-            quantity_agents[agent.unique_id] = agent.quantity
+            new_strategies[agent.unique_id], switches, params_agents[agent.unique_id] = self.determine_new_strategy(
+                agent, other, switches
+            )
 
         # replace each agent by its new strategy
-        self.replace_agents(new_strategies, surplus_agents, quantity_agents)
+        # self.replace_agents(new_strategies, surplus_agents, quantity_agents)
+        self.replace_agents(new_strategies, params_agents)
 
         # update the amount of period sequence with no switches
         if switches > 0:
