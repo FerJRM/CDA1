@@ -22,7 +22,7 @@ def set_arguments():
         "market_id", type=int, help="id of market of the given simulation to to run"
     )
     parser.add_argument(
-        "cda_type", type=str, choices=["GS", "GS evo", "TD"], help="type of cda market to run"
+        "cda_type", type=str, choices=["GS", "GS evo", "TD", "TD evo"], help="type of cda market to run"
     )
     parser.add_argument(
         "N", type=int, help="amount of simulations"

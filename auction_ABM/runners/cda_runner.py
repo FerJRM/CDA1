@@ -14,8 +14,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from auction_ABM.auctions.cda_GS import CDAGS, EvoCDA
-from auction_ABM.auctions.cda_TD import CDATD
+import auction_ABM.auctions.cda_GS as GS
+import auction_ABM.auctions.cda_TD as TD
 
 DPI = 300
 
@@ -47,11 +47,13 @@ class CDARunner:
         parameters and to run a single simulation.
         """
         if self.cda_type.lower() == "gs":
-            auction = CDAGS(*parameters)
+            auction = GS.CDA(*parameters)
         elif self.cda_type.lower() == "gs evo":
-            auction = EvoCDA(*parameters)
+            auction = GS.ReplicationByImitation(*parameters)
         elif self.cda_type.lower() == "td":
-            auction = CDATD(*parameters)
+            auction = TD.CDA(*parameters)
+        elif self.cda_type.lower() == "td evo":
+            auction = TD.ReplicationByImitation(*parameters)
             
         return auction.step()
 

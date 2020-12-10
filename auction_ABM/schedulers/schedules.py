@@ -143,7 +143,7 @@ class RandomGS(BaseScheduler):
 
         return self.model.transaction_possible
 
-class EvoRandomGS(RandomGS):
+class ImitationScheduler(RandomGS):
     """
     Scheduler for an evolutionary CDA tournament. The evolutionary process is 
     done by means of "replication by imitation".
@@ -307,7 +307,7 @@ class EvoRandomGS(RandomGS):
         self.time = 0
         self.steps = 0
 
-class EvoImitationMayority(EvoRandomGS):
+class EvoImitationMayority(ImitationScheduler):
     """
     Scheduler for an evolutionary CDA tournament. The evolutionary process is 
     done by means of "mayority imitation".

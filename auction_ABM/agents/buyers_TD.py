@@ -446,11 +446,11 @@ class Kaplan_buy(ZI_buy):
         """
         return self.spread_ratio, self.profit_perc, self.time_frac
 
-    def set_import_params(self, s, p, t):
+    def set_import_params(self, values):
         """
         Set important params during imitation process
         """
-        self.spread_ratio, self.profit_perc, self.time_frac = s, p, t
+        self.spread_ratio, self.profit_perc, self.time_frac = values
 
     def willing_to_shout(self):
         """

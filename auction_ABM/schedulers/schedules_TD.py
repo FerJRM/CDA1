@@ -98,3 +98,164 @@ class RandomTD(BaseScheduler):
         self.time += 1
 
         return trade_made
+
+class ImitationScheduler(RandomTD):
+    """
+    Scheduler for an evolutionary CDA tournament. The evolutionary process is 
+    done by means of "replication by imitation".
+    """
+
+    def determine_new_strategy(self, agent, other, switches):
+        """
+        Determines if the agent decides to switch strategies or not by comparing
+        its own performance to a randomly selected other trader of the same
+        market side
+        """
+
+        # own profit is better, keep strategy
+        if agent.surplus > other.surplus:
+            return agent.strategy, switches, agent.get_import_params()
+
+        # profit other is better, switch strategy depending on relative difference
+        elif agent.surplus < other.surplus:
+
+            prob = (other.surplus - agent.surplus) / other.surplus      
+            if random.random() < prob:
+
+                if other.strategy != agent.strategy:
+                    switches += 1
+                    return other.strategy, switches, other.get_import_params()
+                else:
+                    return agent.strategy, switches, other.get_import_params()
+
+            else:
+                return agent.strategy, switches, agent.get_import_params()
+
+        # surplus is equal so choice depends on the quantity of both agents
+        elif agent.quantity > other.quantity:
+            return agent.strategy, switches, agent.get_import_params()
+
+        elif agent.quantity < other.quantity:
+
+            if other.strategy != agent.strategy:
+                switches += 1
+                return other.strategy, switches, other.get_import_params()
+            else:
+                return agent.strategy, switches, other.get_import_params()
+
+        # quantity is also equal so rather test same strategy again
+        else:
+            return agent.strategy, switches, agent.get_import_params()
+
+    def replace_buyer(self, agent, new_strategy, params_agent):
+        """
+        Replace a buyer by its new strategy, keep track of its surplus and 
+        quantity and reset its parameters. Returns the newly made agent
+        """
+
+        quantity, surplus = agent.get_quantity_surplus()
+
+        # make new agent
+        standard_params = [agent.unique_id, self.model, self.model.prices_buy, self.model.eq_buyer_surplus]
+        if new_strategy.upper() == "ZI_C":
+            new_agent = ZI_C_buy(*standard_params)
+
+        elif new_strategy.upper() == "KAPLAN":
+            new_agent = Kaplan_buy(*standard_params, self.model.params_strats[new_strategy.upper()])
+
+        elif new_strategy.upper() == "ZIP":
+            new_agent = ZIP_buy(*standard_params, self.model.params_strats[new_strategy.upper()])
+
+        # keep track of surplus and quantity; reset agent for next period
+        new_agent.set_import_params(params_agent)
+        new_agent.set_quantity_surplus(quantity, surplus)
+        new_agent.reset_agent()
+
+        return new_agent
+
+    def replace_seller(self, agent, new_strategy, params_agent):
+        """
+        Replace a seller by its new strategy, keep track of its surplus and 
+        quantity and reset its parameters. Returns the newly made agent
+        """
+
+        quantity, surplus = agent.get_quantity_surplus()
+
+        # make new agent
+        standard_params = [agent.unique_id, self.model, self.model.prices_sell, self.model.eq_seller_surplus]
+        if new_strategy.upper() == "ZI_C":
+            new_agent = ZI_C_sell(*standard_params)
+        elif new_strategy.upper() == "KAPLAN":
+            new_agent = Kaplan_sell(*standard_params, self.model.params_strats[new_strategy.upper()])
+        elif new_strategy.upper() == "ZIP":
+            new_agent = ZIP_sell(*standard_params, self.model.params_strats[new_strategy.upper()])
+
+        # keep track of surplus and quantity; reset agent for next period
+        new_agent.set_import_params(params_agent)
+        new_agent.set_quantity_surplus(quantity, surplus)
+        new_agent.reset_agent()
+
+        return new_agent
+
+    # def replace_agents(self, new_strategies, surplus_agents, quantity_agents):
+    def replace_agents(self, new_strategies, params_agents):
+        """
+        Replace all agents by their new strategies
+        """
+        # replace each agent by its new strategy
+        for agent in self.agent_buffer():
+            if agent.market_side.lower() == "buyer":
+                new_agent = self.replace_buyer(
+                    agent, new_strategies[agent.unique_id], params_agents[agent.unique_id]
+                )
+            else:
+                new_agent = self.replace_seller(
+                    agent, new_strategies[agent.unique_id], params_agents[agent.unique_id]
+                )
+            
+            self._agents[agent.unique_id] = new_agent
+
+    def reset_agents(self):
+        """
+        Determines the new strategy of all agents by means of "replication by 
+        imitation": each agent compares its performance to a randomly selected 
+        agent (including copies) and chooses to keep its own strategy or to switch
+        to the strategy of the other (imitation)
+        """
+
+        switches = 0
+
+        # start finding the new strategies of all agents, also keep track of 
+        # their surplus and quantity, ALSO KEEP TRACK OF THEIR PARAMETERS
+        new_strategies = {}
+        params_agents = {}
+        for agent in self.agent_buffer():
+
+            # if current profit is better than last period then keep strategy
+            if agent.surplus >= agent.prev_surplus:
+                new_strategies[agent.unique_id] = agent.strategy
+                params_agents[agent.unique_id] = agent.get_import_params()
+                continue
+
+            # randomly select other agent from same market side
+            while True:
+                other = self.model.random.choice(self.agents)
+                if agent.market_side.upper() == other.market_side.upper():
+                    break
+
+            # determines which strategy to choose by means of replication by imitation
+            new_strategies[agent.unique_id], switches, params_agents[agent.unique_id] = self.determine_new_strategy(
+                agent, other, switches
+            )
+
+        # replace each agent by its new strategy
+        self.replace_agents(new_strategies, params_agents)
+
+        # update the amount of period sequence with no switches
+        if switches > 0:
+            self.model.periods_no_switches = 0
+        else:
+            self.model.periods_no_switches += 1
+
+        self.time = 0
+        self.steps = 0

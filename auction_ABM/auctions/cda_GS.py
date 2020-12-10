@@ -18,7 +18,7 @@ from mesa import Model
 from mesa.datacollection import DataCollector
 from tqdm import tqdm as pbar
 
-from auction_ABM.schedulers.schedules import RandomGS, EvoRandomGS
+from auction_ABM.schedulers.schedules import RandomGS, ImitationScheduler
 from auction_ABM.agents.buyers_GS import ZI_buy, ZI_C_buy, Kaplan_buy, ZIP_buy
 from auction_ABM.agents.sellers_GS import ZI_sell, ZI_C_sell, Kaplan_sell, ZIP_sell
 
@@ -69,7 +69,7 @@ def get_spearman_pvalue(model):
     """
     return model.spearman_pvalue[model.period]
 
-class CDAGS(Model):
+class CDA(Model):
     """
     Continuous Double Auction model as represented in Gode en Sunder (1993).
     It manages the flow in of agents steps and collects the necessary data,
@@ -462,7 +462,7 @@ class CDAGS(Model):
 
         return data_transactions, data_periods, data_agents, data_periods_agents
 
-class EvoCDA(CDAGS):
+class ReplicationByImitation(CDA):
     def __init__(
             self, unique_id, name, market_id, prices_buy, prices_sell, equilibrium, parameters, 
             params_strategies={"ZI_C": {}}, total_buyers_strategies={"ZI_C": 10}, 
@@ -505,7 +505,7 @@ class EvoCDA(CDAGS):
         """
         Initialize population of traders
         """
-        self.schedule = EvoRandomGS(self)
+        self.schedule = ImitationScheduler(self)
         self.running = True
         
         for strategy, buyers in self.buyers_strats.items():
@@ -604,5 +604,6 @@ class EvoCDA(CDAGS):
         data_periods = self.datacollector_periods.get_model_vars_dataframe()
         data_agents = self.datacollector_transactions.get_agent_vars_dataframe()
         data_periods_agents = self.datacollector_periods.get_agent_vars_dataframe()
+        data_evo = pd.DataFrame(self.evo_process)
 
-        return data_transactions, data_periods, data_agents, data_periods_agents, pd.DataFrame(self.evo_process)
+        return data_transactions, data_periods, data_agents, data_periods_agents, data_evo
